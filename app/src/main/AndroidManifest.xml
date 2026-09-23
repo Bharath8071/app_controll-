@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Optional now: only used for the future "accurate time analytics" page,
+         not for core detection/blocking anymore (that's the Accessibility Service). -->
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
+
+    <!-- Draw checklist / timer / block overlays on top of other apps -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
+
+    <application
+        android:name=".FocusGuardApp"
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="FocusGuard"
+        android:theme="@style/Theme.FocusGuard">
+
+        <!-- Main screen: monitored app list, daily budgets, Notion setup -->
+        <activity
+            android:name=".ui.main.MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- First-run permission walkthrough: accessibility + overlay + device admin + Notion token -->
+        <activity android:name=".ui.onboarding.OnboardingActivity" />
+
+        <!--
+          THE CORE ENGINE. System-managed lifecycle — starts itself once the
+          user enables it in Settings > Accessibility, survives independently
+          of our app process being "open". No polling loop, no battery drain
+          from a foreground service; Android calls onAccessibilityEvent()
+          the instant a window changes, which is the "check only when the
+          app opens" behavior we wanted instead of checking on a timer.
+        -->
+        <service
+            android:name=".service.FocusGuardAccessibilityService"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+
+        <!-- Anti-tamper: makes plain uninstall/force-stop harder to do casually -->
+        <receiver
+            android:name=".service.FocusGuardDeviceAdminReceiver"
+            android:permission="android.permission.BIND_DEVICE_ADMIN"
+            android:exported="true">
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/device_admin_policies" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+            </intent-filter>
+        </receiver>
+
+    </application>
+</manifest>

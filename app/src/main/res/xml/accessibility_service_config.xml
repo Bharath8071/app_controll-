@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagRetrieveInteractiveWindows"
+    android:canRetrieveWindowContent="false"
+    android:notificationTimeout="100"
+    android:description="@string/accessibility_service_description" />
+
+<!--
+  We deliberately only listen for typeWindowStateChanged (which app/window is
+  now in front) — NOT content-reading events. canRetrieveWindowContent is
+  false because FocusGuard has no reason to read screen text, only to know
+  which package is in the foreground. Keeping this minimal is both a privacy
+  choice and makes the Play Console accessibility-usage justification honest
+  if this ever goes past phase 1.
+-->

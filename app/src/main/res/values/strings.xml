@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">FocusGuard</string>
+    <string name="accessibility_service_description">FocusGuard uses this only to detect when a monitored app (like Instagram or YouTube) is opened, so it can show your checklist and time picker. It does not read screen content or personal data.</string>
+</resources>
