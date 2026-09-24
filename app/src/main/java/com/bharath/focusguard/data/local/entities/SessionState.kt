@@ -14,5 +14,7 @@ data class SessionState(
     @PrimaryKey val packageName: String,
     val sessionStartTimeMillis: Long,
     val sessionLengthMinutes: Int,
+    val sessionExpiresAtMillis: Long = sessionStartTimeMillis + (sessionLengthMinutes * 60_000L),
+    val lastResumedAtMillis: Long = sessionStartTimeMillis,
     val isActive: Boolean = true
 )

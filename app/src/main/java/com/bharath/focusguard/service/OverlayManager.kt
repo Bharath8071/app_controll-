@@ -6,6 +6,7 @@ import android.graphics.PixelFormat
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.view.Gravity
 import android.view.WindowManager
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.getValue
@@ -31,9 +32,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Wraps the WindowManager plumbing for drawing Compose screens on top of
- * whatever app is in the foreground. Only one overlay is visible at a time:
- * checklist -> picker -> (hidden while app runs) -> block/tamper.
+ * Wraps WindowManager to render Compose overlays on top of foreground apps.
+ * Traps all gestures and touches to prevent leakage to blocked apps.
  */
 class OverlayManager(private val context: Context) {
 
@@ -45,6 +45,7 @@ class OverlayManager(private val context: Context) {
     private val prefs = UserPreferences(context.applicationContext)
 
     var onEmergencyExtend: ((MonitoredApp) -> Unit)? = null
+    var onGoHomeAction: (() -> Unit)? = null
 
     private fun overlayLayoutParams(fullScreenBlocking: Boolean) = WindowManager.LayoutParams(
         WindowManager.LayoutParams.MATCH_PARENT,
@@ -54,14 +55,17 @@ class OverlayManager(private val context: Context) {
         else
             @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_SYSTEM_ALERT,
         if (fullScreenBlocking) {
-            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+            // Note: Omitting FLAG_NOT_TOUCH_MODAL captures all touch events in the window
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
         } else {
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
         },
         PixelFormat.TRANSLUCENT
-    )
+    ).apply {
+        gravity = Gravity.CENTER
+    }
 
     private fun replaceOverlay(content: ComposeView, fullScreenBlocking: Boolean) {
         runOnMain {
@@ -90,13 +94,21 @@ class OverlayManager(private val context: Context) {
         else mainHandler.post(block)
     }
 
-    /** onSessionPicked is wired by the caller to FocusGuardAccessibilityService.startSession(). */
+    /**
+     * Shows the checklist overlay with zero network delay by reading the local cache immediately,
+     * while scheduling an asynchronous background Notion sync.
+     */
     fun showChecklistThenPicker(app: MonitoredApp, minutesLeft: Int, onSessionPicked: (Int) -> Unit) {
         scope.launch {
-            val tasks = loadTasks()
-            val view = context.createOverlayComposeView {
+            // Instant render from local Room cache
+            val cachedTasks = withContext(Dispatchers.IO) { db.notionTaskDao().getAllOnce() }
+            
+            // Asynchronous Notion background sync
+            launch(Dispatchers.IO) { syncNotionInBackground() }
+
+            val view = context.createOverlayComposeView(onBackPressed = { goHome() }) {
                 MaterialTheme {
-                    var current by remember { mutableStateOf(tasks) }
+                    var current by remember { mutableStateOf(cachedTasks) }
                     ChecklistScreen(
                         appName = app.displayName,
                         tasks = current,
@@ -106,7 +118,8 @@ class OverlayManager(private val context: Context) {
                             }
                             scope.launch { persistTaskCheck(task, checked) }
                         },
-                        onContinue = { showTimePicker(app, minutesLeft, onSessionPicked) }
+                        onContinue = { showTimePicker(app, minutesLeft, onSessionPicked) },
+                        onGoHome = { goHome() }
                     )
                 }
             }
@@ -115,36 +128,39 @@ class OverlayManager(private val context: Context) {
     }
 
     fun showTimePicker(app: MonitoredApp, minutesLeft: Int, onSessionPicked: (Int) -> Unit) {
-        val view = context.createOverlayComposeView {
+        val view = context.createOverlayComposeView(onBackPressed = { goHome() }) {
             MaterialTheme {
                 TimePickerScreen(
                     appName = app.displayName,
                     minutesLeft = minutesLeft.coerceAtLeast(1),
-                    onPicked = { minutes -> onSessionPicked(minutes) }
+                    onPicked = { minutes -> onSessionPicked(minutes) },
+                    onGoHome = { goHome() }
                 )
             }
         }
         replaceOverlay(view, fullScreenBlocking = true)
     }
 
-    fun showBlockScreen(app: MonitoredApp) {
-        showBlock(app, showExtend = false)
-    }
-
-    fun showBlockScreenWithExtendOption(app: MonitoredApp) {
-        showBlock(app, showExtend = true)
-    }
-
-    private fun showBlock(app: MonitoredApp, showExtend: Boolean) {
-        val view = context.createOverlayComposeView {
+    /**
+     * Displayed when a user's planned session ends, but they still have daily budget left.
+     */
+    fun showSessionFinishedScreen(
+        app: MonitoredApp,
+        minutesLeft: Int,
+        onNewSession: () -> Unit
+    ) {
+        val view = context.createOverlayComposeView(onBackPressed = { goHome() }) {
             MaterialTheme {
                 BlockScreen(
                     app = app,
-                    showExtend = showExtend,
+                    isHardBlock = false,
+                    minutesLeft = minutesLeft,
+                    showExtend = false,
                     onGoHome = { goHome() },
-                    onExtend = {
+                    onExtend = { },
+                    onNewSession = {
                         hideAll()
-                        onEmergencyExtend?.invoke(app)
+                        onNewSession()
                     }
                 )
             }
@@ -152,8 +168,31 @@ class OverlayManager(private val context: Context) {
         replaceOverlay(view, fullScreenBlocking = true)
     }
 
+    /**
+     * Displayed when the user has exhausted their daily budget for the app.
+     */
+    fun showHardBlockScreen(app: MonitoredApp, canExtend: Boolean) {
+        val view = context.createOverlayComposeView(onBackPressed = { goHome() }) {
+            MaterialTheme {
+                BlockScreen(
+                    app = app,
+                    isHardBlock = true,
+                    minutesLeft = 0,
+                    showExtend = canExtend,
+                    onGoHome = { goHome() },
+                    onExtend = {
+                        hideAll()
+                        onEmergencyExtend?.invoke(app)
+                    },
+                    onNewSession = { }
+                )
+            }
+        }
+        replaceOverlay(view, fullScreenBlocking = true)
+    }
+
     fun showTamperLock() {
-        val view = context.createOverlayComposeView {
+        val view = context.createOverlayComposeView(onBackPressed = { goHome() }) {
             MaterialTheme {
                 TamperLockScreen(
                     onOpenSettings = {
@@ -173,25 +212,34 @@ class OverlayManager(private val context: Context) {
 
     fun goHome() {
         hideAll()
+        try {
+            onGoHomeAction?.invoke()
+        } catch (e: Exception) {
+        }
         val home = Intent(Intent.ACTION_MAIN).apply {
             addCategory(Intent.CATEGORY_HOME)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK
         }
-        context.startActivity(home)
+        try {
+            context.startActivity(home)
+        } catch (e: Exception) {
+        }
     }
 
-    private suspend fun loadTasks(): List<NotionTask> {
-        val token = prefs.getToken()
-        val databaseId = prefs.getDatabaseId()
-        if (token.isNotBlank() && databaseId.isNotBlank()) {
-            val repo = NotionRepository(
-                api = NotionClient.create(token),
-                dao = db.notionTaskDao(),
-                databaseId = databaseId
-            )
-            repo.syncTasksFromNotion()
+    private suspend fun syncNotionInBackground() {
+        try {
+            val token = prefs.getToken()
+            val databaseId = prefs.getDatabaseId()
+            if (token.isNotBlank() && databaseId.isNotBlank()) {
+                val repo = NotionRepository(
+                    api = NotionClient.create(token),
+                    dao = db.notionTaskDao(),
+                    databaseId = databaseId
+                )
+                repo.syncTasksFromNotion()
+            }
+        } catch (e: Exception) {
         }
-        return withContext(Dispatchers.IO) { db.notionTaskDao().getAllOnce() }
     }
 
     private suspend fun persistTaskCheck(task: NotionTask, checked: Boolean) {

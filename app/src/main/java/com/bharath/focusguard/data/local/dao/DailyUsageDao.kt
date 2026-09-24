@@ -15,7 +15,10 @@ interface DailyUsageDao {
     @Upsert
     suspend fun upsert(usage: DailyUsage)
 
-    @Query("UPDATE daily_usage SET minutesUsedToday = minutesUsedToday + :minutes WHERE packageName = :pkg AND date = :date")
+    @Query("UPDATE daily_usage SET secondsUsedToday = secondsUsedToday + :seconds, minutesUsedToday = (secondsUsedToday + :seconds) / 60 WHERE packageName = :pkg AND date = :date")
+    suspend fun addSeconds(pkg: String, date: String, seconds: Int)
+
+    @Query("UPDATE daily_usage SET minutesUsedToday = minutesUsedToday + :minutes, secondsUsedToday = secondsUsedToday + (:minutes * 60) WHERE packageName = :pkg AND date = :date")
     suspend fun addMinutes(pkg: String, date: String, minutes: Int)
 
     @Query("UPDATE daily_usage SET extendUsedToday = 1 WHERE packageName = :pkg AND date = :date")

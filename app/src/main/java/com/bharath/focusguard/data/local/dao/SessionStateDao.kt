@@ -13,4 +13,7 @@ interface SessionStateDao {
 
     @Query("UPDATE session_state SET isActive = 0 WHERE packageName = :pkg")
     suspend fun endSession(pkg: String)
+
+    @Query("UPDATE session_state SET lastResumedAtMillis = :timeMillis WHERE packageName = :pkg AND isActive = 1")
+    suspend fun updateLastResumed(pkg: String, timeMillis: Long)
 }

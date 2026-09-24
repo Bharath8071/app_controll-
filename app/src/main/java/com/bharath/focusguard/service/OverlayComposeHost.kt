@@ -17,6 +17,8 @@ import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 
+import android.view.KeyEvent
+
 /**
  * WindowManager overlays are not Activities, so ComposeView needs an
  * artificial lifecycle / saved-state owner attached to the view tree.
@@ -39,16 +41,30 @@ class OverlayLifecycleOwner : LifecycleOwner, ViewModelStoreOwner, SavedStateReg
     }
 }
 
-fun Context.createOverlayComposeView(content: @Composable () -> Unit): ComposeView {
+fun Context.createOverlayComposeView(
+    onBackPressed: (() -> Unit)? = null,
+    content: @Composable () -> Unit
+): ComposeView {
     val owner = OverlayLifecycleOwner()
     val themed = ContextThemeWrapper(this, com.bharath.focusguard.R.style.Theme_FocusGuard)
     return ComposeView(themed).apply {
         setViewTreeLifecycleOwner(owner)
         setViewTreeViewModelStoreOwner(owner)
         setViewTreeSavedStateRegistryOwner(owner)
+        isFocusable = true
+        isFocusableInTouchMode = true
+        setOnKeyListener { _, keyCode, event ->
+            if (keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
+                onBackPressed?.invoke()
+                true
+            } else {
+                false
+            }
+        }
         addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
             override fun onViewAttachedToWindow(v: View) {
                 owner.lifecycle.let { /* already RESUMED */ }
+                requestFocus()
             }
             override fun onViewDetachedFromWindow(v: View) {
                 owner.destroy()
@@ -57,3 +73,4 @@ fun Context.createOverlayComposeView(content: @Composable () -> Unit): ComposeVi
         setContent { content() }
     }
 }
+
