@@ -9,7 +9,7 @@ import com.bharath.focusguard.data.local.entities.*
 
 @Database(
     entities = [MonitoredApp::class, DailyUsage::class, SessionState::class, NotionTask::class],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

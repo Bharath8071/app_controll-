@@ -8,6 +8,5 @@ data class DailyUsage(
     val packageName: String,
     val date: String,               // "yyyy-MM-dd", local device date
     val minutesUsedToday: Int = 0,
-    val secondsUsedToday: Int = minutesUsedToday * 60,
     val extendUsedToday: Boolean = false  // the one-time +5 min emergency extend
 )
