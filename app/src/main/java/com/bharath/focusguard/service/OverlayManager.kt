@@ -54,7 +54,7 @@ class OverlayManager(private val context: Context) {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         else
             @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_SYSTEM_ALERT,
-        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
         PixelFormat.TRANSLUCENT
     ).apply {
@@ -68,6 +68,7 @@ class OverlayManager(private val context: Context) {
             try {
                 windowManager.addView(content, overlayLayoutParams(fullScreenBlocking))
             } catch (e: Exception) {
+                android.util.Log.e("FocusGuard", "Failed to add WindowManager overlay", e)
                 currentOverlayView = null
             }
         }

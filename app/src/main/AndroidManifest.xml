@@ -34,6 +34,14 @@
         <!-- First-run permission walkthrough: accessibility + overlay + device admin + Notion token -->
         <activity android:name=".ui.onboarding.OnboardingActivity" />
 
+        <!-- Dedicated hard-block screen shown when daily budget is exhausted -->
+        <activity
+            android:name=".ui.overlay.BlockedActivity"
+            android:exported="false"
+            android:theme="@style/Theme.FocusGuard"
+            android:launchMode="singleTask"
+            android:excludeFromRecents="true" />
+
         <!--
           THE CORE ENGINE. System-managed lifecycle — starts itself once the
           user enables it in Settings > Accessibility, survives independently

@@ -56,6 +56,15 @@ fun BlockScreen(
             Spacer(Modifier.height(6.dp))
 
             Text(
+                text = "Time is completed! Come back tomorrow.",
+                color = Color.White,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 15.sp
+            )
+
+            Spacer(Modifier.height(4.dp))
+
+            Text(
                 text = "You've reached your daily limit of ${app.dailyBudgetMinutes} minutes for today.",
                 color = Color(0xFF94A3B8),
                 style = MaterialTheme.typography.bodyMedium

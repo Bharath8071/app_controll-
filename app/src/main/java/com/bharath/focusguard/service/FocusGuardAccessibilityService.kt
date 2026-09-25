@@ -126,9 +126,9 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         val minutesLeft = monitored.dailyBudgetMinutes - used
 
         if (minutesLeft <= 0) {
-            // ── BLOCKED: Daily limit reached. Show the hard-block popup. ──
+            // ── BLOCKED: Daily limit reached. Show the hard-block screen. ──
             val canExtend = (usage?.extendUsedToday == false)
-            showToast("${monitored.displayName} is locked for today. Daily limit reached.")
+            launchBlockedActivity(monitored, canExtend)
             overlayManager.showHardBlockScreen(monitored, canExtend = canExtend)
         } else {
             // ── GATE: Budget remaining. Show checklist → time picker. ──
@@ -221,12 +221,9 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         val inForeground = (currentForegroundPkg == pkg)
 
         if (minutesLeft <= 0) {
-            // Daily budget fully used — hard block
+            // Daily budget fully used — hard block!
             val canExtend = (usage?.extendUsedToday == false)
-            if (inForeground) {
-                performGlobalAction(GLOBAL_ACTION_HOME)
-                showToast("${monitored.displayName} time is up! Daily limit reached.")
-            }
+            launchBlockedActivity(monitored, canExtend)
             overlayManager.showHardBlockScreen(monitored, canExtend = canExtend)
         } else {
             // This session finished but budget remains — "Session Done" screen
@@ -269,6 +266,23 @@ class FocusGuardAccessibilityService : AccessibilityService() {
 
     private fun fmtTime(millis: Long): String =
         DateFormat.getTimeFormat(applicationContext).format(Date(millis))
+
+    private fun launchBlockedActivity(monitored: MonitoredApp, canExtend: Boolean) {
+        try {
+            val intent = android.content.Intent(applicationContext, com.bharath.focusguard.ui.overlay.BlockedActivity::class.java).apply {
+                putExtra(com.bharath.focusguard.ui.overlay.BlockedActivity.EXTRA_PACKAGE_NAME, monitored.packageName)
+                putExtra(com.bharath.focusguard.ui.overlay.BlockedActivity.EXTRA_DISPLAY_NAME, monitored.displayName)
+                putExtra(com.bharath.focusguard.ui.overlay.BlockedActivity.EXTRA_DAILY_BUDGET, monitored.dailyBudgetMinutes)
+                putExtra(com.bharath.focusguard.ui.overlay.BlockedActivity.EXTRA_CAN_EXTEND, canExtend)
+                flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
+                    android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP
+            }
+            startActivity(intent)
+        } catch (e: Exception) {
+            android.util.Log.e("FocusGuard", "Failed to launch BlockedActivity", e)
+        }
+    }
 
     private fun showToast(message: String) {
         mainHandler.post { Toast.makeText(applicationContext, message, Toast.LENGTH_LONG).show() }

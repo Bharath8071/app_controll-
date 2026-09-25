@@ -51,20 +51,9 @@ fun Context.createOverlayComposeView(
         setViewTreeLifecycleOwner(owner)
         setViewTreeViewModelStoreOwner(owner)
         setViewTreeSavedStateRegistryOwner(owner)
-        isFocusable = true
-        isFocusableInTouchMode = true
-        setOnKeyListener { _, keyCode, event ->
-            if (keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
-                onBackPressed?.invoke()
-                true
-            } else {
-                false
-            }
-        }
         addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
             override fun onViewAttachedToWindow(v: View) {
                 owner.lifecycle.let { /* already RESUMED */ }
-                requestFocus()
             }
             override fun onViewDetachedFromWindow(v: View) {
                 owner.destroy()
