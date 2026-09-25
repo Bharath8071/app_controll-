@@ -171,6 +171,13 @@ fun TimePickerScreen(
 
         Spacer(Modifier.height(20.dp))
 
+        val context = androidx.compose.ui.platform.LocalContext.current
+        val closeTimePreview = remember(selectedMinutes, effectiveBudget) {
+            val mins = selectedMinutes.coerceIn(1, effectiveBudget)
+            val format = android.text.format.DateFormat.getTimeFormat(context)
+            format.format(java.util.Date(System.currentTimeMillis() + (mins * 60_000L)))
+        }
+
         Button(
             onClick = { onPicked(selectedMinutes.coerceIn(1, effectiveBudget)) },
             modifier = Modifier
@@ -183,7 +190,7 @@ fun TimePickerScreen(
             )
         ) {
             Text(
-                text = "Start Session (${selectedMinutes.coerceIn(1, effectiveBudget)} min) ➔",
+                text = "Unlock until $closeTimePreview ➔",
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 15.sp
             )
