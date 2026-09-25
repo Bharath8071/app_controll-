@@ -69,8 +69,11 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         val newPkg = event.packageName?.toString() ?: return
 
         if (isIgnoredTransientPackage(newPkg)) return
-        if (newPkg == currentForegroundPkg) return
 
+        // IMPORTANT: same-package re-entry must still be revalidated.
+        // If the user leaves the app, returns to the same package later, or a
+        // session expires while the app is already in foreground, we still need
+        // to run the budget/session checks again.
         currentForegroundPkg = newPkg
         serviceScope.launch { handleAppEntered(newPkg) }
     }
