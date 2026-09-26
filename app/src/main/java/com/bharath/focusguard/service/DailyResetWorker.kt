@@ -20,12 +20,6 @@ class DailyResetWorker(context: Context, params: WorkerParameters) : CoroutineWo
         val db = AppDatabase.getInstance(applicationContext)
         val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
         db.dailyUsageDao().clearOldDays(today)
-
-        val accessibilityOn = PermissionUtils.hasAccessibilityPermission(applicationContext)
-        val overlayOn = PermissionUtils.hasOverlayPermission(applicationContext)
-        if (!accessibilityOn || !overlayOn) {
-            OverlayManager(applicationContext).showTamperLock()
-        }
         return Result.success()
     }
 }

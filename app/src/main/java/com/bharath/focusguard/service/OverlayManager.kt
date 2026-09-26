@@ -77,8 +77,14 @@ class OverlayManager(private val context: Context) {
     private fun removeCurrentOverlay() {
         currentOverlayView?.let { view ->
             try {
-                windowManager.removeView(view)
+                if (view.isAttachedToWindow) {
+                    windowManager.removeViewImmediate(view)
+                }
             } catch (e: Exception) {
+                try {
+                    windowManager.removeView(view)
+                } catch (e2: Exception) {
+                }
             }
         }
         currentOverlayView = null

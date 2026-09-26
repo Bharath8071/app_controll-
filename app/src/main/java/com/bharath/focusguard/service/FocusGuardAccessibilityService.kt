@@ -18,18 +18,11 @@ import java.util.*
 /**
  * FocusGuard Core Engine.
  *
- * Blocking logic (simple and reliable):
- *
- *  1. User opens Instagram → check today's minutesUsedToday in DB vs dailyBudgetMinutes.
- *  2. If budget exhausted → show HARD BLOCK popup immediately. No usage allowed.
- *  3. If budget remains and NO active session → show checklist + time-picker.
- *  4. If budget remains and an active unexpired session EXISTS → let the user in silently.
- *  5. When the session countdown timer fires → mark session ended, show block or "session done".
- *  6. If the user re-opens the app after the timer has already fired (i.e. session expired in DB)
- *     → the "minutesLeft <= 0" check at step 1/2 blocks them because budget was deducted upfront.
- *
- * This means the block works even if the Accessibility Service was restarted by Android
- * (killed + restarted) because the budget check is ALWAYS done fresh from the DB on every open.
+ * Full-screen App Blocker Overlay Architecture:
+ *  - When user leaves a monitored app -> overlay is IMMEDIATELY removed so keyboards & other apps work 100% free.
+ *  - When user opens a monitored app whose daily limit is completed -> full-screen opaque overlay covers the ENTIRE app.
+ *  - When user's chosen session timer expires -> overlay immediately covers the ENTIRE app with "Return to Home".
+ *  - The user has ONLY the option to return home; no app access is allowed while blocked.
  */
 class FocusGuardAccessibilityService : AccessibilityService() {
 
@@ -38,10 +31,10 @@ class FocusGuardAccessibilityService : AccessibilityService() {
     private lateinit var overlayManager: OverlayManager
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    /** Tracks which package is in the foreground right now. */
+    /** Tracks which package is currently in the foreground. */
     private var currentForegroundPkg: String? = null
 
-    /** In-memory session timers. These are re-armed on re-enter if session is still valid in DB. */
+    /** In-memory session timers per package. */
     private val sessionTimerJobs = mutableMapOf<String, Job>()
 
     // ─────────────────────────────────────────────────────────
@@ -68,45 +61,53 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val newPkg = event.packageName?.toString() ?: return
 
+        // Ignore transient system packages (keyboards, system status bar, notifications)
         if (isIgnoredTransientPackage(newPkg)) return
 
-        // IMPORTANT: same-package re-entry must still be revalidated.
-        // If the user leaves the app, returns to the same package later, or a
-        // session expires while the app is already in foreground, we still need
-        // to run the budget/session checks again.
         currentForegroundPkg = newPkg
-        serviceScope.launch { handleAppEntered(newPkg) }
+
+        serviceScope.launch {
+            val monitored = db.monitoredAppDao().getByPackage(newPkg)
+            if (monitored == null || !monitored.isEnabled) {
+                // User is NOT in a monitored app (Home, Chrome, WhatsApp, Settings, etc.)
+                // IMMEDIATELY remove any overlay so the keyboard and all apps are completely unblocked!
+                overlayManager.hideAll()
+                return@launch
+            }
+
+            // User IS in a monitored app!
+            handleMonitoredAppEntered(monitored)
+        }
     }
 
     private fun isIgnoredTransientPackage(pkg: String): Boolean {
         if (pkg == packageName) return true
         if (pkg == "com.android.systemui" || pkg == "android") return true
+        // Keyboards / IMEs
         if (pkg.contains("inputmethod") || pkg.contains("keyboard") ||
             pkg.contains("honeyboard") || pkg.contains("swiftkey") || pkg.contains("gboard")) {
             return true
         }
+        // System permission & credential sheets
         if (pkg.contains("permissioncontroller") || pkg == "com.google.android.gms") return true
         return false
     }
 
     // ─────────────────────────────────────────────────────────
-    // Core: handleAppEntered
+    // Core: handleMonitoredAppEntered
     // ─────────────────────────────────────────────────────────
 
-    private suspend fun handleAppEntered(pkg: String) {
-        val monitored = db.monitoredAppDao().getByPackage(pkg) ?: return
-        if (!monitored.isEnabled) return
-
-        val now    = System.currentTimeMillis()
-        val today  = todayDateString()
+    private suspend fun handleMonitoredAppEntered(monitored: MonitoredApp) {
+        val pkg   = monitored.packageName
+        val now   = System.currentTimeMillis()
+        val today = todayDateString()
         ensureUsageRow(pkg, today)
 
-        // ── STEP 1: Check if there's an ACTIVE (non-expired) session window. ──
-        // If yes → user is in their allowed window. Let them in silently.
+        // ── 1. Check if there's an ACTIVE, unexpired session window ──
         val session = db.sessionStateDao().getActive(pkg)
         if (session != null && now < session.sessionExpiresAtMillis) {
+            // App is unlocked for this session window! Hide overlay and let user use it.
             overlayManager.hideAll()
-            // Re-arm the in-memory timer (handles service restart scenario)
             val remaining = session.sessionExpiresAtMillis - now
             armTimer(pkg, remaining)
             val closeStr = fmtTime(session.sessionExpiresAtMillis)
@@ -114,24 +115,24 @@ class FocusGuardAccessibilityService : AccessibilityService() {
             return
         }
 
-        // ── STEP 2: No valid active session. Clean up any stale DB session row. ──
+        // ── 2. No valid active session. Clean up stale session row if any ──
         if (session != null) {
             db.sessionStateDao().endSession(pkg)
         }
         sessionTimerJobs.remove(pkg)?.cancel()
 
-        // ── STEP 3: Check the daily budget STRICTLY from the DB. ──
-        val usage      = db.dailyUsageDao().get(pkg, today)
-        val used       = usage?.minutesUsedToday ?: 0
+        // ── 3. Check daily budget from DB ──
+        val usage       = db.dailyUsageDao().get(pkg, today)
+        val used        = usage?.minutesUsedToday ?: 0
         val minutesLeft = monitored.dailyBudgetMinutes - used
 
         if (minutesLeft <= 0) {
-            // ── BLOCKED: Daily limit reached. Show the hard-block screen. ──
+            // ── HARD BLOCK: Daily limit exhausted! ──
+            // Blocker overlay covers the entire app and gives only the option to return home.
             val canExtend = (usage?.extendUsedToday == false)
-            launchBlockedActivity(monitored, canExtend)
             overlayManager.showHardBlockScreen(monitored, canExtend = canExtend)
         } else {
-            // ── GATE: Budget remaining. Show checklist → time picker. ──
+            // ── GATE: Budget remains. Show checklist → duration picker ──
             overlayManager.showChecklistThenPicker(monitored, minutesLeft) { pickedMinutes ->
                 startSession(monitored, pickedMinutes)
             }
@@ -139,20 +140,14 @@ class FocusGuardAccessibilityService : AccessibilityService() {
     }
 
     // ─────────────────────────────────────────────────────────
-    // Session Start
+    // Session Management
     // ─────────────────────────────────────────────────────────
 
     /**
-     * Called when the user picks a session duration.
-     *
-     * • Deducts the full chosen duration from today's budget IMMEDIATELY (upfront deduction).
-     *   This means even if the service is restarted, the budget is already written to the DB
-     *   and the block will fire correctly on the next app open.
-     *
-     * • Stores sessionExpiresAtMillis in the DB so the "active session" check is also
-     *   persisted across service restarts.
-     *
-     * • Arms an in-memory countdown that calls onTimerExpired when the window closes.
+     * Starts an intentional session:
+     * - Immediately allocates the chosen minutes to today's DB usage (upfront deduction).
+     * - Persists sessionExpiresAtMillis so app remains unlocked until that exact time.
+     * - Hides the overlay and starts countdown timer.
      */
     fun startSession(monitored: MonitoredApp, minutes: Int) {
         val pkg = monitored.packageName
@@ -161,36 +156,33 @@ class FocusGuardAccessibilityService : AccessibilityService() {
             val expiresAt = now + (minutes * 60_000L)
             val today     = todayDateString()
 
-            // Upfront deduction
+            // Deduct chosen minutes from today's budget immediately
             ensureUsageRow(pkg, today)
             db.dailyUsageDao().addMinutes(pkg, today, minutes)
 
-            // Persist the session window
+            // Persist session window
             db.sessionStateDao().upsert(
                 SessionState(
-                    packageName          = pkg,
+                    packageName            = pkg,
                     sessionStartTimeMillis = now,
-                    sessionLengthMinutes = minutes,
+                    sessionLengthMinutes   = minutes,
                     sessionExpiresAtMillis = expiresAt,
-                    lastResumedAtMillis  = now,
-                    isActive             = true
+                    lastResumedAtMillis    = now,
+                    isActive               = true
                 )
             )
 
+            // Remove overlay so user can use the app
             overlayManager.hideAll()
 
-            // Tell user the exact clock time it will lock
+            // Display exact closing time
             val closeStr = fmtTime(expiresAt)
             showToast("${monitored.displayName} will close at $closeStr")
 
-            // Arm countdown
+            // Arm in-memory countdown
             armTimer(pkg, minutes * 60_000L)
         }
     }
-
-    // ─────────────────────────────────────────────────────────
-    // Timer
-    // ─────────────────────────────────────────────────────────
 
     private fun armTimer(pkg: String, remainingMillis: Long) {
         sessionTimerJobs.remove(pkg)?.cancel()
@@ -202,11 +194,9 @@ class FocusGuardAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * Called when the session countdown window has elapsed.
-     * The budget is already deducted (upfront), so we just:
-     *  - End the session row in DB.
-     *  - Kick the user to Home if they're currently in the app.
-     *  - Show the appropriate popup (Hard Block or "Session Done").
+     * Called the instant the session countdown expires.
+     * If user is currently looking at the app, the blocker overlay IMMEDIATELY
+     * covers the ENTIRE app, giving only the option to return home!
      */
     private suspend fun onTimerExpired(pkg: String) {
         db.sessionStateDao().endSession(pkg)
@@ -219,20 +209,16 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         val minutesLeft = monitored.dailyBudgetMinutes - used
 
         val inForeground = (currentForegroundPkg == pkg)
+        if (!inForeground) return
 
+        // Time is up while user is in the app:
+        // Cover the ENTIRE app with the blocker overlay!
         if (minutesLeft <= 0) {
-            // Daily budget fully used — hard block!
             val canExtend = (usage?.extendUsedToday == false)
-            launchBlockedActivity(monitored, canExtend)
             overlayManager.showHardBlockScreen(monitored, canExtend = canExtend)
         } else {
-            // This session finished but budget remains — "Session Done" screen
-            if (inForeground) {
-                performGlobalAction(GLOBAL_ACTION_HOME)
-                showToast("${monitored.displayName} session over. $minutesLeft min left today.")
-            }
             overlayManager.showSessionFinishedScreen(monitored, minutesLeft) {
-                serviceScope.launch { handleAppEntered(pkg) }
+                serviceScope.launch { handleMonitoredAppEntered(monitored) }
             }
         }
     }
@@ -266,23 +252,6 @@ class FocusGuardAccessibilityService : AccessibilityService() {
 
     private fun fmtTime(millis: Long): String =
         DateFormat.getTimeFormat(applicationContext).format(Date(millis))
-
-    private fun launchBlockedActivity(monitored: MonitoredApp, canExtend: Boolean) {
-        try {
-            val intent = android.content.Intent(applicationContext, com.bharath.focusguard.ui.overlay.BlockedActivity::class.java).apply {
-                putExtra(com.bharath.focusguard.ui.overlay.BlockedActivity.EXTRA_PACKAGE_NAME, monitored.packageName)
-                putExtra(com.bharath.focusguard.ui.overlay.BlockedActivity.EXTRA_DISPLAY_NAME, monitored.displayName)
-                putExtra(com.bharath.focusguard.ui.overlay.BlockedActivity.EXTRA_DAILY_BUDGET, monitored.dailyBudgetMinutes)
-                putExtra(com.bharath.focusguard.ui.overlay.BlockedActivity.EXTRA_CAN_EXTEND, canExtend)
-                flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
-                    android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                    android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP
-            }
-            startActivity(intent)
-        } catch (e: Exception) {
-            android.util.Log.e("FocusGuard", "Failed to launch BlockedActivity", e)
-        }
-    }
 
     private fun showToast(message: String) {
         mainHandler.post { Toast.makeText(applicationContext, message, Toast.LENGTH_LONG).show() }

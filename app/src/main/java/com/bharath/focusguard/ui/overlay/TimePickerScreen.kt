@@ -26,11 +26,10 @@ fun TimePickerScreen(
     onGoHome: () -> Unit = {}
 ) {
     val presets = listOf(5, 10, 15, 25)
-    var selectedMinutes by remember {
-        mutableStateOf(presets.firstOrNull { it <= minutesLeft } ?: minutesLeft.coerceAtLeast(1))
-    }
-    var customText by remember { mutableStateOf("") }
     val effectiveBudget = minutesLeft.coerceAtLeast(1)
+    var selectedMinutes by remember {
+        mutableStateOf(presets.firstOrNull { it <= effectiveBudget } ?: effectiveBudget)
+    }
 
     OverlayScaffold {
         // App header pill
@@ -101,7 +100,7 @@ fun TimePickerScreen(
         ) {
             presets.forEach { preset ->
                 val isAvailable = preset <= effectiveBudget
-                val isSelected = selectedMinutes == preset && customText.isBlank()
+                val isSelected = selectedMinutes == preset
 
                 Surface(
                     modifier = Modifier
@@ -109,7 +108,6 @@ fun TimePickerScreen(
                         .height(46.dp)
                         .clickable(enabled = isAvailable) {
                             selectedMinutes = preset
-                            customText = ""
                         },
                     shape = RoundedCornerShape(12.dp),
                     color = when {
@@ -144,30 +142,61 @@ fun TimePickerScreen(
 
         Spacer(Modifier.height(14.dp))
 
-        // Custom minutes input
-        OutlinedTextField(
-            value = customText,
-            onValueChange = { input ->
-                val digits = input.filter(Char::isDigit).take(3)
-                customText = digits
-                digits.toIntOrNull()?.let {
-                    selectedMinutes = it.coerceIn(1, effectiveBudget)
-                }
-            },
-            label = { Text("Custom minutes (max $effectiveBudget)") },
-            placeholder = { Text("e.g. 8") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        // Touch Stepper for custom minutes (No keyboard required)
+        Surface(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = Color(0xFF6366F1),
-                unfocusedBorderColor = Color(0xFF334155),
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color(0xFFE2E8F0),
-                focusedLabelColor = Color(0xFFA5B4FC),
-                unfocusedLabelColor = Color(0xFF94A3B8)
-            )
-        )
+            shape = RoundedCornerShape(14.dp),
+            color = Color(0xFF1E293B),
+            border = BorderStroke(1.dp, Color(0xFF334155))
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                FilledTonalIconButton(
+                    onClick = {
+                        selectedMinutes = (selectedMinutes - 1).coerceAtLeast(1)
+                    },
+                    enabled = selectedMinutes > 1,
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(
+                        containerColor = Color(0xFF334155),
+                        contentColor = Color.White
+                    )
+                ) {
+                    Text("−", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                }
+
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "$selectedMinutes min",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp
+                    )
+                    Text(
+                        text = "tap + / − to adjust",
+                        color = Color(0xFF94A3B8),
+                        fontSize = 11.sp
+                    )
+                }
+
+                FilledTonalIconButton(
+                    onClick = {
+                        selectedMinutes = (selectedMinutes + 1).coerceAtMost(effectiveBudget)
+                    },
+                    enabled = selectedMinutes < effectiveBudget,
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(
+                        containerColor = Color(0xFF334155),
+                        contentColor = Color.White
+                    )
+                ) {
+                    Text("+", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
 
         Spacer(Modifier.height(20.dp))
 

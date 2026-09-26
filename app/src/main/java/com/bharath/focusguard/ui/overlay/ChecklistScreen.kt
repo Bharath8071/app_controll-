@@ -177,7 +177,7 @@ fun OverlayScaffold(content: @Composable ColumnScope.() -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xF2090D16)) // 95% opacity deep dark background
+            .background(Color(0xFF090D16)) // 100% opaque solid dark background: completely hides the app underneath
             .pointerInput(Unit) {
                 // Consume all touch events completely so touches never leak to the app underneath
                 detectTapGestures { }

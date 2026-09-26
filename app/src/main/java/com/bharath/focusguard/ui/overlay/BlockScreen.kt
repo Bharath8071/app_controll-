@@ -219,21 +219,7 @@ fun BlockScreen(
                     contentColor = Color.White
                 )
             ) {
-                Text("Take a Break (Go Home)", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-            }
-
-            Spacer(Modifier.height(8.dp))
-
-            OutlinedButton(
-                onClick = onNewSession,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(44.dp),
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFA5B4FC)),
-                border = BorderStroke(1.dp, Color(0xFF475569))
-            ) {
-                Text("Start Another Session", fontWeight = FontWeight.Medium)
+                Text("Return to Home Screen", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
             }
         }
     }
