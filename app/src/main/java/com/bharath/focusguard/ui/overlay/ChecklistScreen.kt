@@ -9,7 +9,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -20,6 +20,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bharath.focusguard.data.local.entities.NotionTask
+import kotlinx.coroutines.delay
 
 @Composable
 fun ChecklistScreen(
@@ -29,6 +30,14 @@ fun ChecklistScreen(
     onContinue: () -> Unit,
     onGoHome: () -> Unit = {}
 ) {
+    // 10-second reflection pause matching Chrome extension (initially disabled, no countdown text)
+    var isButtonEnabled by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        delay(10_000L) // 10 seconds intentional friction pause
+        isButtonEnabled = true
+    }
+
     OverlayScaffold {
         // App header pill
         Box(
@@ -49,7 +58,7 @@ fun ChecklistScreen(
             )
         }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(14.dp))
 
         Text(
             text = "Pause with Intention",
@@ -58,10 +67,10 @@ fun ChecklistScreen(
             fontWeight = FontWeight.Bold
         )
 
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(4.dp))
 
         Text(
-            text = "Check your current priorities before diving into $appName:",
+            text = "Review your top priority tasks before opening $appName:",
             color = Color(0xFF94A3B8),
             style = MaterialTheme.typography.bodyMedium
         )
@@ -101,7 +110,7 @@ fun ChecklistScreen(
                     .heightIn(max = 280.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(tasks, key = { it.notionPageId }) { task ->
+                items(tasks.take(3), key = { it.notionPageId }) { task ->
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
@@ -127,13 +136,24 @@ fun ChecklistScreen(
                                 )
                             )
                             Spacer(Modifier.width(8.dp))
-                            Text(
-                                text = task.title,
-                                color = if (task.isChecked) Color(0xFF64748B) else Color(0xFFF1F5F9),
-                                textDecoration = if (task.isChecked) TextDecoration.LineThrough else null,
-                                fontSize = 14.sp,
-                                fontWeight = if (task.isChecked) FontWeight.Normal else FontWeight.Medium
-                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = task.title,
+                                    color = if (task.isChecked) Color(0xFF64748B) else Color(0xFFF1F5F9),
+                                    textDecoration = if (task.isChecked) TextDecoration.LineThrough else null,
+                                    fontSize = 14.sp,
+                                    fontWeight = if (task.isChecked) FontWeight.Normal else FontWeight.Medium
+                                )
+                                if (task.priorityRank == 1) {
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(
+                                        text = "⚡ High Priority",
+                                        color = Color(0xFFFBBF24),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -142,18 +162,22 @@ fun ChecklistScreen(
 
         Spacer(Modifier.height(20.dp))
 
+        // Reflection pause button: disabled for 10s without countdown text, auto-enables after 10s
         Button(
             onClick = onContinue,
+            enabled = isButtonEnabled,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(48.dp),
             shape = RoundedCornerShape(14.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = Color(0xFF6366F1),
-                contentColor = Color.White
+                contentColor = Color.White,
+                disabledContainerColor = Color(0xFF1E293B),
+                disabledContentColor = Color(0xFF64748B)
             )
         ) {
-            Text("Set Session Limit ➔", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+            Text("Proceed to Timer ➔", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
         }
 
         Spacer(Modifier.height(8.dp))

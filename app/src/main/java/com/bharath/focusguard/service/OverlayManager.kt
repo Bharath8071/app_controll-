@@ -102,14 +102,23 @@ class OverlayManager(private val context: Context) {
     fun showChecklistThenPicker(app: MonitoredApp, minutesLeft: Int, onSessionPicked: (Int) -> Unit) {
         scope.launch {
             // Instant render from local Room cache
-            val cachedTasks = withContext(Dispatchers.IO) { db.notionTaskDao().getAllOnce() }
-            
-            // Asynchronous Notion background sync
-            launch(Dispatchers.IO) { syncNotionInBackground() }
+            val cachedTasks = withContext(Dispatchers.IO) { db.notionTaskDao().getTopPriorityOnce() }
 
             val view = context.createOverlayComposeView(onBackPressed = { goHome() }) {
                 MaterialTheme {
                     var current by remember { mutableStateOf(cachedTasks) }
+
+                    // Asynchronous Notion background sync updates tasks live
+                    LaunchedEffect(Unit) {
+                        withContext(Dispatchers.IO) {
+                            syncNotionInBackground()
+                            val updated = db.notionTaskDao().getTopPriorityOnce()
+                            withContext(Dispatchers.Main) {
+                                current = updated
+                            }
+                        }
+                    }
+
                     ChecklistScreen(
                         appName = app.displayName,
                         tasks = current,

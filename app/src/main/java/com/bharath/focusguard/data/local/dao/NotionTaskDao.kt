@@ -9,7 +9,10 @@ interface NotionTaskDao {
     @Query("SELECT * FROM notion_tasks ORDER BY lastSyncedAt DESC")
     fun getAll(): Flow<List<NotionTask>>
 
-    @Query("SELECT * FROM notion_tasks ORDER BY lastSyncedAt DESC")
+    @Query("SELECT * FROM notion_tasks ORDER BY isChecked ASC, priorityRank ASC, lastSyncedAt DESC LIMIT 3")
+    suspend fun getTopPriorityOnce(): List<NotionTask>
+
+    @Query("SELECT * FROM notion_tasks ORDER BY isChecked ASC, priorityRank ASC, lastSyncedAt DESC LIMIT 3")
     suspend fun getAllOnce(): List<NotionTask>
 
     @Upsert
@@ -17,4 +20,7 @@ interface NotionTaskDao {
 
     @Query("UPDATE notion_tasks SET isChecked = :checked WHERE notionPageId = :id")
     suspend fun setChecked(id: String, checked: Boolean)
+
+    @Query("DELETE FROM notion_tasks")
+    suspend fun clearAll()
 }

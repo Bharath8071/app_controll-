@@ -9,5 +9,6 @@ data class NotionTask(
     @PrimaryKey val notionPageId: String,
     val title: String,
     val isChecked: Boolean,
-    val lastSyncedAt: Long
+    val lastSyncedAt: Long,
+    val priorityRank: Int = 4 // 1=High, 2=Medium, 3=Low, 4=Unspecified
 )

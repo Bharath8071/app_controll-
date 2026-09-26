@@ -25,7 +25,7 @@ fun TimePickerScreen(
     onPicked: (Int) -> Unit,
     onGoHome: () -> Unit = {}
 ) {
-    val presets = listOf(5, 10, 15, 25)
+    val presets = listOf(5, 10, 20)
     val effectiveBudget = minutesLeft.coerceAtLeast(1)
     var selectedMinutes by remember {
         mutableStateOf(presets.firstOrNull { it <= effectiveBudget } ?: effectiveBudget)
