@@ -1,6 +1,7 @@
 package com.bharath.focusguard.service
 
 import android.accessibilityservice.AccessibilityService
+import android.content.Intent
 import android.os.Handler
 import android.os.Looper
 import android.text.format.DateFormat
@@ -14,15 +15,16 @@ import com.bharath.focusguard.util.PermissionUtils
 import kotlinx.coroutines.*
 import java.text.SimpleDateFormat
 import java.util.*
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * FocusGuard Core Engine.
  *
- * Full-screen App Blocker Overlay Architecture:
+ * Full-screen App Blocker & Session Enforcer:
  *  - When user leaves a monitored app -> overlay is IMMEDIATELY removed so keyboards & other apps work 100% free.
- *  - When user opens a monitored app whose daily limit is completed -> full-screen opaque overlay covers the ENTIRE app.
- *  - When user's chosen session timer expires -> overlay immediately covers the ENTIRE app with "Return to Home".
- *  - The user has ONLY the option to return home; no app access is allowed while blocked.
+ *  - When session timer expires -> FORCIBLY EXITS the monitored app to Home and notifies user.
+ *  - When daily budget is exhausted -> FORCIBLY EXITS the app to Home, and on re-opening shows full-screen Hard Block overlay with only option to return Home.
+ *  - Un-killable 1-second ticker on Main Looper ensures timers fire with second-level precision, immune to system interruptions.
  */
 class FocusGuardAccessibilityService : AccessibilityService() {
 
@@ -34,8 +36,19 @@ class FocusGuardAccessibilityService : AccessibilityService() {
     /** Tracks which package is currently in the foreground. */
     private var currentForegroundPkg: String? = null
 
-    /** In-memory session timers per package. */
-    private val sessionTimerJobs = mutableMapOf<String, Job>()
+    /** Tracks the last monitored app package that was opened. */
+    private var lastMonitoredPkg: String? = null
+
+    /** In-memory map of active session package -> expiry time in millis. */
+    private val activeSessionMap = ConcurrentHashMap<String, Long>()
+
+    /** 1-second ticker running on the Main Looper */
+    private val timerRunnable = object : Runnable {
+        override fun run() {
+            checkActiveSessions()
+            mainHandler.postDelayed(this, 1000L)
+        }
+    }
 
     // ─────────────────────────────────────────────────────────
     // Lifecycle
@@ -46,11 +59,32 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         db = AppDatabase.getInstance(applicationContext)
         overlayManager = OverlayManager(applicationContext).also { manager ->
             manager.onEmergencyExtend = { app -> grantEmergencyExtend(app) }
-            manager.onGoHomeAction = { performGlobalAction(GLOBAL_ACTION_HOME) }
+            manager.onGoHomeAction = { exitToHome() }
         }
         if (!PermissionUtils.hasOverlayPermission(this)) {
             overlayManager.showTamperLock()
         }
+
+        // Restore any active sessions from Room DB
+        serviceScope.launch {
+            try {
+                val now = System.currentTimeMillis()
+                val activeList = db.sessionStateDao().getAllActive()
+                for (s in activeList) {
+                    if (now < s.sessionExpiresAtMillis) {
+                        activeSessionMap[s.packageName] = s.sessionExpiresAtMillis
+                    } else {
+                        db.sessionStateDao().endSession(s.packageName)
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("FocusGuard", "Failed to restore active sessions", e)
+            }
+        }
+
+        // Start 1-second ticker
+        mainHandler.removeCallbacks(timerRunnable)
+        mainHandler.post(timerRunnable)
     }
 
     // ─────────────────────────────────────────────────────────
@@ -61,7 +95,7 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val newPkg = event.packageName?.toString() ?: return
 
-        // Ignore transient system packages (keyboards, system status bar, notifications)
+        // Ignore transient system packages (keyboards, system status bar, notifications, our own overlay)
         if (isIgnoredTransientPackage(newPkg)) return
 
         currentForegroundPkg = newPkg
@@ -70,12 +104,15 @@ class FocusGuardAccessibilityService : AccessibilityService() {
             val monitored = db.monitoredAppDao().getByPackage(newPkg)
             if (monitored == null || !monitored.isEnabled) {
                 // User is NOT in a monitored app (Home, Chrome, WhatsApp, Settings, etc.)
-                // IMMEDIATELY remove any overlay so the keyboard and all apps are completely unblocked!
-                overlayManager.hideAll()
+                lastMonitoredPkg = null
+                withContext(Dispatchers.Main) {
+                    overlayManager.hideAll()
+                }
                 return@launch
             }
 
             // User IS in a monitored app!
+            lastMonitoredPkg = newPkg
             handleMonitoredAppEntered(monitored)
         }
     }
@@ -85,7 +122,8 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         if (pkg == "com.android.systemui" || pkg == "android") return true
         // Keyboards / IMEs
         if (pkg.contains("inputmethod") || pkg.contains("keyboard") ||
-            pkg.contains("honeyboard") || pkg.contains("swiftkey") || pkg.contains("gboard")) {
+            pkg.contains("honeyboard") || pkg.contains("swiftkey") || pkg.contains("gboard") ||
+            pkg.contains("ime") || pkg.contains("sogou") || pkg.contains("baidu")) {
             return true
         }
         // System permission & credential sheets
@@ -107,11 +145,10 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         val session = db.sessionStateDao().getActive(pkg)
         if (session != null && now < session.sessionExpiresAtMillis) {
             // App is unlocked for this session window! Hide overlay and let user use it.
-            overlayManager.hideAll()
-            val remaining = session.sessionExpiresAtMillis - now
-            armTimer(pkg, remaining)
-            val closeStr = fmtTime(session.sessionExpiresAtMillis)
-            showToast("${monitored.displayName} unlocked until $closeStr")
+            activeSessionMap[pkg] = session.sessionExpiresAtMillis
+            withContext(Dispatchers.Main) {
+                overlayManager.hideAll()
+            }
             return
         }
 
@@ -119,22 +156,24 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         if (session != null) {
             db.sessionStateDao().endSession(pkg)
         }
-        sessionTimerJobs.remove(pkg)?.cancel()
+        activeSessionMap.remove(pkg)
 
         // ── 3. Check daily budget from DB ──
         val usage       = db.dailyUsageDao().get(pkg, today)
         val used        = usage?.minutesUsedToday ?: 0
         val minutesLeft = monitored.dailyBudgetMinutes - used
 
-        if (minutesLeft <= 0) {
-            // ── HARD BLOCK: Daily limit exhausted! ──
-            // Blocker overlay covers the entire app and gives only the option to return home.
-            val canExtend = (usage?.extendUsedToday == false)
-            overlayManager.showHardBlockScreen(monitored, canExtend = canExtend)
-        } else {
-            // ── GATE: Budget remains. Show checklist → duration picker ──
-            overlayManager.showChecklistThenPicker(monitored, minutesLeft) { pickedMinutes ->
-                startSession(monitored, pickedMinutes)
+        withContext(Dispatchers.Main) {
+            if (minutesLeft <= 0) {
+                // ── HARD BLOCK: Daily limit exhausted! ──
+                // Blocker overlay covers the entire app and gives only the option to return home.
+                val canExtend = (usage?.extendUsedToday == false)
+                overlayManager.showHardBlockScreen(monitored, canExtend = canExtend)
+            } else {
+                // ── GATE: Budget remains. Show checklist → duration picker ──
+                overlayManager.showChecklistThenPicker(monitored, minutesLeft) { pickedMinutes ->
+                    startSession(monitored, pickedMinutes)
+                }
             }
         }
     }
@@ -147,7 +186,7 @@ class FocusGuardAccessibilityService : AccessibilityService() {
      * Starts an intentional session:
      * - Immediately allocates the chosen minutes to today's DB usage (upfront deduction).
      * - Persists sessionExpiresAtMillis so app remains unlocked until that exact time.
-     * - Hides the overlay and starts countdown timer.
+     * - Hides the overlay and registers session with the 1-second active ticker.
      */
     fun startSession(monitored: MonitoredApp, minutes: Int) {
         val pkg = monitored.packageName
@@ -172,54 +211,88 @@ class FocusGuardAccessibilityService : AccessibilityService() {
                 )
             )
 
-            // Remove overlay so user can use the app
-            overlayManager.hideAll()
+            // Register in in-memory 1-second active ticker
+            activeSessionMap[pkg] = expiresAt
 
-            // Display exact closing time
-            val closeStr = fmtTime(expiresAt)
-            showToast("${monitored.displayName} will close at $closeStr")
+            withContext(Dispatchers.Main) {
+                // Remove overlay so user can use the app
+                overlayManager.hideAll()
 
-            // Arm in-memory countdown
-            armTimer(pkg, minutes * 60_000L)
+                // Display exact closing time
+                val closeStr = fmtTime(expiresAt)
+                showToast("${monitored.displayName} unlocked until $closeStr")
+            }
         }
     }
 
-    private fun armTimer(pkg: String, remainingMillis: Long) {
-        sessionTimerJobs.remove(pkg)?.cancel()
-        val job = serviceScope.launch {
-            delay(remainingMillis.coerceAtLeast(0L))
+    /**
+     * Checks all active sessions every 1000ms.
+     * Guaranteed to fire promptly on the Main Looper.
+     */
+    private fun checkActiveSessions() {
+        val now = System.currentTimeMillis()
+        val expiredPackages = mutableListOf<String>()
+
+        for ((pkg, expiresAt) in activeSessionMap) {
+            if (now >= expiresAt) {
+                expiredPackages.add(pkg)
+            }
+        }
+
+        for (pkg in expiredPackages) {
+            activeSessionMap.remove(pkg)
+        }
+
+        for (pkg in expiredPackages) {
             onTimerExpired(pkg)
         }
-        sessionTimerJobs[pkg] = job
     }
 
     /**
      * Called the instant the session countdown expires.
-     * If user is currently looking at the app, the blocker overlay IMMEDIATELY
-     * covers the ENTIRE app, giving only the option to return home!
+     * Forcibly exits the monitored app to Home, and notifies the user.
      */
-    private suspend fun onTimerExpired(pkg: String) {
-        db.sessionStateDao().endSession(pkg)
-        sessionTimerJobs.remove(pkg)
+    private fun onTimerExpired(pkg: String) {
+        activeSessionMap.remove(pkg)
+        serviceScope.launch {
+            db.sessionStateDao().endSession(pkg)
 
-        val monitored   = db.monitoredAppDao().getByPackage(pkg) ?: return
-        val today       = todayDateString()
-        val usage       = db.dailyUsageDao().get(pkg, today)
-        val used        = usage?.minutesUsedToday ?: 0
-        val minutesLeft = monitored.dailyBudgetMinutes - used
+            val monitored   = db.monitoredAppDao().getByPackage(pkg) ?: return@launch
+            val today       = todayDateString()
+            val usage       = db.dailyUsageDao().get(pkg, today)
+            val used        = usage?.minutesUsedToday ?: 0
+            val minutesLeft = (monitored.dailyBudgetMinutes - used).coerceAtLeast(0)
 
-        val inForeground = (currentForegroundPkg == pkg)
-        if (!inForeground) return
+            withContext(Dispatchers.Main) {
+                val inMonitoredApp = (currentForegroundPkg == pkg || lastMonitoredPkg == pkg)
+                if (inMonitoredApp) {
+                    // FORCIBLY EXIT THE APP TO HOME SCREEN IMMEDIATELY
+                    exitToHome()
+                }
+                overlayManager.hideAll()
 
-        // Time is up while user is in the app:
-        // Cover the ENTIRE app with the blocker overlay!
-        if (minutesLeft <= 0) {
-            val canExtend = (usage?.extendUsedToday == false)
-            overlayManager.showHardBlockScreen(monitored, canExtend = canExtend)
-        } else {
-            overlayManager.showSessionFinishedScreen(monitored, minutesLeft) {
-                serviceScope.launch { handleMonitoredAppEntered(monitored) }
+                if (minutesLeft <= 0) {
+                    showToast("🔒 Time's up! Daily limit reached for ${monitored.displayName}.")
+                } else {
+                    showToast("⏱️ Session ended for ${monitored.displayName}! ($minutesLeft min left today).")
+                }
             }
+        }
+    }
+
+    /**
+     * Forcibly brings the user to the device's Home screen.
+     */
+    private fun exitToHome() {
+        performGlobalAction(GLOBAL_ACTION_HOME)
+        val home = Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_HOME)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        try {
+            startActivity(home)
+        } catch (e: Exception) {
+            android.util.Log.e("FocusGuard", "Failed to start home activity", e)
         }
     }
 
@@ -258,11 +331,13 @@ class FocusGuardAccessibilityService : AccessibilityService() {
     }
 
     override fun onInterrupt() {
-        sessionTimerJobs.values.forEach { it.cancel() }
-        sessionTimerJobs.clear()
+        // Intentionally keep activeSessionMap running so system accessibility interruptions
+        // do not kill focus timers.
     }
 
     override fun onDestroy() {
+        mainHandler.removeCallbacks(timerRunnable)
+        activeSessionMap.clear()
         serviceScope.cancel()
         super.onDestroy()
     }

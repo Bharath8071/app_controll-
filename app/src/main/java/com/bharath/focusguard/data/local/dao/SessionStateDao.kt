@@ -8,6 +8,9 @@ interface SessionStateDao {
     @Query("SELECT * FROM session_state WHERE packageName = :pkg AND isActive = 1 LIMIT 1")
     suspend fun getActive(pkg: String): SessionState?
 
+    @Query("SELECT * FROM session_state WHERE isActive = 1")
+    suspend fun getAllActive(): List<SessionState>
+
     @Upsert
     suspend fun upsert(session: SessionState)
 
