@@ -48,8 +48,8 @@ fun Context.createOverlayComposeView(
     val owner = OverlayLifecycleOwner()
     val themed = ContextThemeWrapper(this, com.bharath.focusguard.R.style.Theme_FocusGuard)
     return object : ComposeView(themed) {
-        override fun dispatchKeyEvent(event: KeyEvent?): Boolean {
-            if (event?.keyCode == KeyEvent.KEYCODE_BACK) {
+        override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+            if (event.keyCode == KeyEvent.KEYCODE_BACK) {
                 if (event.action == KeyEvent.ACTION_UP) {
                     onBackPressed?.invoke()
                 }
