@@ -219,9 +219,11 @@ class OverlayManager(private val context: Context) {
         replaceOverlay(view, fullScreenBlocking = true)
     }
 
-    fun hideAll() = runOnMain {
-        mainHandler.removeCallbacks(delayedHideRunnable)
-        removeCurrentOverlay()
+    fun hideAll() {
+        runOnMain {
+            mainHandler.removeCallbacks(delayedHideRunnable)
+            removeCurrentOverlay()
+        }
     }
 
     fun goHome() {
