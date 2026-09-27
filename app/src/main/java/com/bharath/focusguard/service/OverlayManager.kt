@@ -1,5 +1,6 @@
 package com.bharath.focusguard.service
 
+import android.accessibilityservice.AccessibilityService
 import android.content.Context
 import android.content.Intent
 import android.graphics.PixelFormat
@@ -43,15 +44,18 @@ class OverlayManager(private val context: Context) {
 
     var onEmergencyExtend: ((MonitoredApp) -> Unit)? = null
     var onGoHomeAction: (() -> Unit)? = null
+    private val delayedHideRunnable = Runnable { hideAll() }
 
     private fun overlayLayoutParams(fullScreenBlocking: Boolean) = WindowManager.LayoutParams(
         WindowManager.LayoutParams.MATCH_PARENT,
         WindowManager.LayoutParams.MATCH_PARENT,
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+        if (context is AccessibilityService)
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
+        else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         else
             @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_SYSTEM_ALERT,
-        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+        (if (fullScreenBlocking) 0 else WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) or
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
         PixelFormat.TRANSLUCENT
     ).apply {
@@ -215,22 +219,28 @@ class OverlayManager(private val context: Context) {
         replaceOverlay(view, fullScreenBlocking = true)
     }
 
-    fun hideAll() = runOnMain { removeCurrentOverlay() }
+    fun hideAll() = runOnMain {
+        mainHandler.removeCallbacks(delayedHideRunnable)
+        removeCurrentOverlay()
+    }
 
     fun goHome() {
-        hideAll()
         try {
             onGoHomeAction?.invoke()
         } catch (e: Exception) {
+            android.util.Log.e("FocusGuard", "Failed to invoke onGoHomeAction", e)
         }
         val home = Intent(Intent.ACTION_MAIN).apply {
             addCategory(Intent.CATEGORY_HOME)
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
         }
         try {
             context.startActivity(home)
         } catch (e: Exception) {
+            android.util.Log.e("FocusGuard", "Failed to start home activity", e)
         }
+        mainHandler.removeCallbacks(delayedHideRunnable)
+        mainHandler.postDelayed(delayedHideRunnable, 1200L)
     }
 
     private suspend fun syncNotionInBackground() {

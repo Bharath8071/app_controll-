@@ -57,7 +57,7 @@ class FocusGuardAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         db = AppDatabase.getInstance(applicationContext)
-        overlayManager = OverlayManager(applicationContext).also { manager ->
+        overlayManager = OverlayManager(this).also { manager ->
             manager.onEmergencyExtend = { app -> grantEmergencyExtend(app) }
             manager.onGoHomeAction = { exitToHome() }
         }
@@ -266,10 +266,24 @@ class FocusGuardAccessibilityService : AccessibilityService() {
             withContext(Dispatchers.Main) {
                 val inMonitoredApp = (currentForegroundPkg == pkg || lastMonitoredPkg == pkg)
                 if (inMonitoredApp) {
-                    // FORCIBLY EXIT THE APP TO HOME SCREEN IMMEDIATELY
+                    val canExtend = (usage?.extendUsedToday == false)
+                    if (minutesLeft <= 0) {
+                        overlayManager.showHardBlockScreen(monitored, canExtend = canExtend)
+                    } else {
+                        overlayManager.showSessionFinishedScreen(
+                            app = monitored,
+                            minutesLeft = minutesLeft,
+                            onNewSession = {
+                                overlayManager.showTimePicker(monitored, minutesLeft) { pickedMinutes ->
+                                    startSession(monitored, pickedMinutes)
+                                }
+                            }
+                        )
+                    }
                     exitToHome()
+                } else {
+                    overlayManager.hideAll()
                 }
-                overlayManager.hideAll()
 
                 if (minutesLeft <= 0) {
                     showToast("🔒 Time's up! Daily limit reached for ${monitored.displayName}.")
@@ -284,10 +298,13 @@ class FocusGuardAccessibilityService : AccessibilityService() {
      * Forcibly brings the user to the device's Home screen.
      */
     private fun exitToHome() {
-        performGlobalAction(GLOBAL_ACTION_HOME)
+        val homeSuccess = performGlobalAction(GLOBAL_ACTION_HOME)
+        if (!homeSuccess) {
+            performGlobalAction(GLOBAL_ACTION_BACK)
+        }
         val home = Intent(Intent.ACTION_MAIN).apply {
             addCategory(Intent.CATEGORY_HOME)
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
         }
         try {
             startActivity(home)

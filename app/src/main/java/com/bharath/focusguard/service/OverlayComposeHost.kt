@@ -47,13 +47,27 @@ fun Context.createOverlayComposeView(
 ): ComposeView {
     val owner = OverlayLifecycleOwner()
     val themed = ContextThemeWrapper(this, com.bharath.focusguard.R.style.Theme_FocusGuard)
-    return ComposeView(themed).apply {
+    return object : ComposeView(themed) {
+        override fun dispatchKeyEvent(event: KeyEvent?): Boolean {
+            if (event?.keyCode == KeyEvent.KEYCODE_BACK) {
+                if (event.action == KeyEvent.ACTION_UP) {
+                    onBackPressed?.invoke()
+                }
+                return true
+            }
+            return super.dispatchKeyEvent(event)
+        }
+    }.apply {
+        isFocusable = true
+        isFocusableInTouchMode = true
+        requestFocus()
         setViewTreeLifecycleOwner(owner)
         setViewTreeViewModelStoreOwner(owner)
         setViewTreeSavedStateRegistryOwner(owner)
         addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
             override fun onViewAttachedToWindow(v: View) {
                 owner.lifecycle.let { /* already RESUMED */ }
+                v.post { v.requestFocus() }
             }
             override fun onViewDetachedFromWindow(v: View) {
                 owner.destroy()
