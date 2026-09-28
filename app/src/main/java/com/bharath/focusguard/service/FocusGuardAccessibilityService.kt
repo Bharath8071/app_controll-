@@ -46,6 +46,19 @@ class FocusGuardAccessibilityService : AccessibilityService() {
     /** In-memory map of active session package -> expiry time in millis. */
     private val activeSessionMap = ConcurrentHashMap<String, Long>()
 
+    /** Timestamp when exit to home was triggered, used to suppress re-entrant events from the dying monitored app. */
+    @Volatile
+    private var lastExitToHomeTimeMillis = 0L
+
+    private fun markExitingToHome() {
+        lastExitToHomeTimeMillis = System.currentTimeMillis()
+    }
+
+    private fun isTransitioningToHome(): Boolean {
+        val elapsed = System.currentTimeMillis() - lastExitToHomeTimeMillis
+        return elapsed < 1500L
+    }
+
     /** 1-second ticker running on the Main Looper */
     private val timerRunnable = object : Runnable {
         override fun run() {
@@ -137,6 +150,11 @@ class FocusGuardAccessibilityService : AccessibilityService() {
                 withContext(Dispatchers.Main) {
                     overlayManager.hideAll()
                 }
+                return@launch
+            }
+
+            // If user just tapped Exit/Return to Home, suppress transient window events from the backgrounding app!
+            if (isTransitioningToHome()) {
                 return@launch
             }
 
@@ -338,6 +356,7 @@ class FocusGuardAccessibilityService : AccessibilityService() {
      * Forcibly brings the user to the device's Home screen without circular back-button recursion.
      */
     private fun exitToHome() {
+        markExitingToHome()
         performGlobalAction(GLOBAL_ACTION_HOME)
         val home = Intent(Intent.ACTION_MAIN).apply {
             addCategory(Intent.CATEGORY_HOME)

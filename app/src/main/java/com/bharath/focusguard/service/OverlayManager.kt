@@ -262,16 +262,17 @@ class OverlayManager(private val context: Context) {
 
     fun goHome() {
         runOnMain {
-            // Immediately remove overlay so all touches, gestures, and keys return to Android OS
-            removeCurrentOverlay()
-            currentState = OverlayState.IDLE
-            currentPackage = null
-
             try {
                 onGoHomeAction?.invoke()
             } catch (e: Exception) {
                 android.util.Log.e("FocusGuard", "Failed to invoke onGoHomeAction", e)
             }
+
+            // Immediately remove overlay so all touches, gestures, and keys return to Android OS
+            removeCurrentOverlay()
+            currentState = OverlayState.IDLE
+            currentPackage = null
+
             val home = Intent(Intent.ACTION_MAIN).apply {
                 addCategory(Intent.CATEGORY_HOME)
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
