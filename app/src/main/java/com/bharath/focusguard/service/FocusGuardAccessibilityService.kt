@@ -1,7 +1,11 @@
 package com.bharath.focusguard.service
 
 import android.accessibilityservice.AccessibilityService
+import android.app.KeyguardManager
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.os.Handler
 import android.os.Looper
 import android.text.format.DateFormat
@@ -50,6 +54,15 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         }
     }
 
+    /** BroadcastReceiver to dismiss any active overlay immediately when screen turns off. */
+    private val screenOffReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == Intent.ACTION_SCREEN_OFF) {
+                overlayManager.hideAll()
+            }
+        }
+    }
+
     // ─────────────────────────────────────────────────────────
     // Lifecycle
     // ─────────────────────────────────────────────────────────
@@ -63,6 +76,13 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         }
         if (!PermissionUtils.hasOverlayPermission(this)) {
             overlayManager.showTamperLock()
+        }
+
+        try {
+            val filter = IntentFilter(Intent.ACTION_SCREEN_OFF)
+            registerReceiver(screenOffReceiver, filter)
+        } catch (e: Exception) {
+            android.util.Log.e("FocusGuard", "Failed to register screenOffReceiver", e)
         }
 
         // Restore any active sessions from Room DB
@@ -94,6 +114,15 @@ class FocusGuardAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val newPkg = event.packageName?.toString() ?: return
+
+        // If screen is locked or keyguard active, dismiss overlay immediately so user is never trapped on lockscreen
+        val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+        if (keyguardManager?.isKeyguardLocked == true) {
+            currentForegroundPkg = newPkg
+            lastMonitoredPkg = null
+            overlayManager.hideAll()
+            return
+        }
 
         // Ignore transient system packages (keyboards, system status bar, notifications, our own overlay)
         if (isIgnoredTransientPackage(newPkg)) return
@@ -158,7 +187,18 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         }
         activeSessionMap.remove(pkg)
 
-        // ── 3. Check daily budget from DB ──
+        // ── 3. Prevent re-entrant window events from resetting Screen 2 back to Screen 1 ──
+        if (overlayManager.isGating(pkg)) {
+            // User is already interacting with Screen 1 (Checklist) or Screen 2 (TimePicker) for this app!
+            return
+        }
+
+        // ── 4. Prevent re-triggering block screen if already displayed ──
+        if (overlayManager.isBlocking(pkg)) {
+            return
+        }
+
+        // ── 5. Check daily budget from DB ──
         val usage       = db.dailyUsageDao().get(pkg, today)
         val used        = usage?.minutesUsedToday ?: 0
         val minutesLeft = monitored.dailyBudgetMinutes - used
@@ -295,13 +335,10 @@ class FocusGuardAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * Forcibly brings the user to the device's Home screen.
+     * Forcibly brings the user to the device's Home screen without circular back-button recursion.
      */
     private fun exitToHome() {
-        val homeSuccess = performGlobalAction(GLOBAL_ACTION_HOME)
-        if (!homeSuccess) {
-            performGlobalAction(GLOBAL_ACTION_BACK)
-        }
+        performGlobalAction(GLOBAL_ACTION_HOME)
         val home = Intent(Intent.ACTION_MAIN).apply {
             addCategory(Intent.CATEGORY_HOME)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
@@ -353,6 +390,10 @@ class FocusGuardAccessibilityService : AccessibilityService() {
     }
 
     override fun onDestroy() {
+        try {
+            unregisterReceiver(screenOffReceiver)
+        } catch (e: Exception) {
+        }
         mainHandler.removeCallbacks(timerRunnable)
         activeSessionMap.clear()
         serviceScope.cancel()

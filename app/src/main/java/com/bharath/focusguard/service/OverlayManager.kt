@@ -29,9 +29,19 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+enum class OverlayState {
+    IDLE,
+    CHECKLIST,
+    TIME_PICKER,
+    SESSION_FINISHED,
+    HARD_BLOCK,
+    TAMPER_LOCK
+}
+
 /**
  * Wraps WindowManager to render Compose overlays on top of foreground apps.
- * Traps all gestures and touches to prevent leakage to blocked apps.
+ * Traps all gestures and touches to prevent leakage to blocked apps while keeping
+ * system navigation bar gestures accessible.
  */
 class OverlayManager(private val context: Context) {
 
@@ -42,9 +52,19 @@ class OverlayManager(private val context: Context) {
     private val db = AppDatabase.getInstance(context)
     private val prefs = UserPreferences(context.applicationContext)
 
+    var currentState: OverlayState = OverlayState.IDLE
+        private set
+    var currentPackage: String? = null
+        private set
+
     var onEmergencyExtend: ((MonitoredApp) -> Unit)? = null
     var onGoHomeAction: (() -> Unit)? = null
-    private val delayedHideRunnable = Runnable { hideAll() }
+
+    fun isGating(pkg: String): Boolean =
+        currentPackage == pkg && (currentState == OverlayState.CHECKLIST || currentState == OverlayState.TIME_PICKER)
+
+    fun isBlocking(pkg: String): Boolean =
+        currentPackage == pkg && (currentState == OverlayState.HARD_BLOCK || currentState == OverlayState.SESSION_FINISHED)
 
     private fun overlayLayoutParams(fullScreenBlocking: Boolean) = WindowManager.LayoutParams(
         WindowManager.LayoutParams.MATCH_PARENT,
@@ -56,7 +76,8 @@ class OverlayManager(private val context: Context) {
         else
             @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_SYSTEM_ALERT,
         (if (fullScreenBlocking) 0 else WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) or
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
         PixelFormat.TRANSLUCENT
     ).apply {
         gravity = Gravity.CENTER
@@ -71,6 +92,8 @@ class OverlayManager(private val context: Context) {
             } catch (e: Exception) {
                 android.util.Log.e("FocusGuard", "Failed to add WindowManager overlay", e)
                 currentOverlayView = null
+                currentState = OverlayState.IDLE
+                currentPackage = null
             }
         }
     }
@@ -101,6 +124,8 @@ class OverlayManager(private val context: Context) {
      * while scheduling an asynchronous background Notion sync.
      */
     fun showChecklistThenPicker(app: MonitoredApp, minutesLeft: Int, onSessionPicked: (Int) -> Unit) {
+        currentState = OverlayState.CHECKLIST
+        currentPackage = app.packageName
         scope.launch {
             // Instant render from local Room cache
             val cachedTasks = withContext(Dispatchers.IO) { db.notionTaskDao().getTopPriorityOnce() }
@@ -139,6 +164,8 @@ class OverlayManager(private val context: Context) {
     }
 
     fun showTimePicker(app: MonitoredApp, minutesLeft: Int, onSessionPicked: (Int) -> Unit) {
+        currentState = OverlayState.TIME_PICKER
+        currentPackage = app.packageName
         val view = context.createOverlayComposeView(onBackPressed = { goHome() }) {
             MaterialTheme {
                 TimePickerScreen(
@@ -160,6 +187,8 @@ class OverlayManager(private val context: Context) {
         minutesLeft: Int,
         onNewSession: () -> Unit
     ) {
+        currentState = OverlayState.SESSION_FINISHED
+        currentPackage = app.packageName
         val view = context.createOverlayComposeView(onBackPressed = { goHome() }) {
             MaterialTheme {
                 BlockScreen(
@@ -183,6 +212,8 @@ class OverlayManager(private val context: Context) {
      * Displayed when the user has exhausted their daily budget for the app.
      */
     fun showHardBlockScreen(app: MonitoredApp, canExtend: Boolean) {
+        currentState = OverlayState.HARD_BLOCK
+        currentPackage = app.packageName
         val view = context.createOverlayComposeView(onBackPressed = { goHome() }) {
             MaterialTheme {
                 BlockScreen(
@@ -203,6 +234,8 @@ class OverlayManager(private val context: Context) {
     }
 
     fun showTamperLock() {
+        currentState = OverlayState.TAMPER_LOCK
+        currentPackage = null
         val view = context.createOverlayComposeView(onBackPressed = { goHome() }) {
             MaterialTheme {
                 TamperLockScreen(
@@ -221,28 +254,34 @@ class OverlayManager(private val context: Context) {
 
     fun hideAll() {
         runOnMain {
-            mainHandler.removeCallbacks(delayedHideRunnable)
             removeCurrentOverlay()
+            currentState = OverlayState.IDLE
+            currentPackage = null
         }
     }
 
     fun goHome() {
-        try {
-            onGoHomeAction?.invoke()
-        } catch (e: Exception) {
-            android.util.Log.e("FocusGuard", "Failed to invoke onGoHomeAction", e)
+        runOnMain {
+            // Immediately remove overlay so all touches, gestures, and keys return to Android OS
+            removeCurrentOverlay()
+            currentState = OverlayState.IDLE
+            currentPackage = null
+
+            try {
+                onGoHomeAction?.invoke()
+            } catch (e: Exception) {
+                android.util.Log.e("FocusGuard", "Failed to invoke onGoHomeAction", e)
+            }
+            val home = Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_HOME)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
+            }
+            try {
+                context.startActivity(home)
+            } catch (e: Exception) {
+                android.util.Log.e("FocusGuard", "Failed to start home activity", e)
+            }
         }
-        val home = Intent(Intent.ACTION_MAIN).apply {
-            addCategory(Intent.CATEGORY_HOME)
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
-        }
-        try {
-            context.startActivity(home)
-        } catch (e: Exception) {
-            android.util.Log.e("FocusGuard", "Failed to start home activity", e)
-        }
-        mainHandler.removeCallbacks(delayedHideRunnable)
-        mainHandler.postDelayed(delayedHideRunnable, 1200L)
     }
 
     private suspend fun syncNotionInBackground() {

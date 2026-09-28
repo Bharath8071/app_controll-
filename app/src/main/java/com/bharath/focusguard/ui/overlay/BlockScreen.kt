@@ -208,18 +208,48 @@ fun BlockScreen(
 
             Spacer(Modifier.height(20.dp))
 
-            Button(
-                onClick = onGoHome,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp),
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF6366F1),
-                    contentColor = Color.White
-                )
-            ) {
-                Text("Return to Home Screen", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+            if (minutesLeft > 0) {
+                Button(
+                    onClick = onNewSession,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF6366F1),
+                        contentColor = Color.White
+                    )
+                ) {
+                    Text("Start Another Session ($minutesLeft min left) ➔", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                }
+
+                Spacer(Modifier.height(8.dp))
+
+                OutlinedButton(
+                    onClick = onGoHome,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF94A3B8)),
+                    border = BorderStroke(1.dp, Color(0xFF334155))
+                ) {
+                    Text("Return to Home Screen", fontWeight = FontWeight.Medium)
+                }
+            } else {
+                Button(
+                    onClick = onGoHome,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF6366F1),
+                        contentColor = Color.White
+                    )
+                ) {
+                    Text("Return to Home Screen", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                }
             }
         }
     }

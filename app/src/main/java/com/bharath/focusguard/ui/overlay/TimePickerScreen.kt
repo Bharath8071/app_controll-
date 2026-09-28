@@ -18,6 +18,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
+import kotlinx.coroutines.delay
+
 @Composable
 fun TimePickerScreen(
     appName: String,
@@ -201,10 +203,17 @@ fun TimePickerScreen(
         Spacer(Modifier.height(20.dp))
 
         val context = androidx.compose.ui.platform.LocalContext.current
-        val closeTimePreview = remember(selectedMinutes, effectiveBudget) {
+        var currentTimeMillis by remember { mutableStateOf(System.currentTimeMillis()) }
+        LaunchedEffect(Unit) {
+            while (true) {
+                delay(1000L)
+                currentTimeMillis = System.currentTimeMillis()
+            }
+        }
+        val closeTimePreview = remember(currentTimeMillis, selectedMinutes, effectiveBudget) {
             val mins = selectedMinutes.coerceIn(1, effectiveBudget)
             val format = android.text.format.DateFormat.getTimeFormat(context)
-            format.format(java.util.Date(System.currentTimeMillis() + (mins * 60_000L)))
+            format.format(java.util.Date(currentTimeMillis + (mins * 60_000L)))
         }
 
         Button(
