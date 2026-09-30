@@ -1,8 +1,5 @@
 package com.bharath.focusguard.ui.overlay
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -14,7 +11,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -51,8 +47,6 @@ fun CooldownBlockScreen(
     }
 
     val isFinished = remainingMillis <= 0L
-    val totalCooldownMillis = 10 * 60_000f
-    val progress = (remainingMillis / totalCooldownMillis).coerceIn(0f, 1f)
 
     OverlayScaffold {
         // Icon Header with gentle amber/orange glow
@@ -101,7 +95,7 @@ fun CooldownBlockScreen(
             textAlign = TextAlign.Center
         )
 
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(6.dp))
 
         Text(
             text = "Your session ended. A standard 10-minute break is active to break mindless habit loops.",
@@ -112,52 +106,6 @@ fun CooldownBlockScreen(
         )
 
         Spacer(Modifier.height(18.dp))
-
-        // Mindful Pause Status Card (No stressful countdown numbers)
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(18.dp),
-            color = Color(0xFF1E293B),
-            border = BorderStroke(
-                1.dp,
-                if (isFinished) Color(0xFF10B981).copy(alpha = 0.6f) else Color(0xFF334155)
-            )
-        ) {
-            Column(
-                modifier = Modifier.padding(vertical = 18.dp, horizontal = 16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(
-                    text = if (isFinished) "✓ Cooldown Complete!" else "⏸️ Mindful Pause in Progress",
-                    color = if (isFinished) Color(0xFF34D399) else Color.White,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold
-                )
-
-                Spacer(Modifier.height(6.dp))
-
-                Text(
-                    text = if (isFinished) "Your 10-minute break is finished. Tap below to continue." else "Step away and take a deep breath. FocusGuard will unlock when the pause finishes.",
-                    color = Color(0xFF94A3B8),
-                    fontSize = 12.sp,
-                    textAlign = TextAlign.Center,
-                    lineHeight = 17.sp
-                )
-
-                Spacer(Modifier.height(14.dp))
-
-                LinearProgressIndicator(
-                    progress = { if (isFinished) 0f else progress },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(6.dp),
-                    color = if (isFinished) Color(0xFF10B981) else Color(0xFFF59E0B),
-                    trackColor = Color(0xFF334155),
-                )
-            }
-        }
-
-        Spacer(Modifier.height(14.dp))
 
         // Daily Budget Remaining Pill
         Surface(
@@ -188,33 +136,7 @@ fun CooldownBlockScreen(
             }
         }
 
-        Spacer(Modifier.height(14.dp))
-
-        // Mindfulness Advice Card
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
-            color = Color(0xFF0F172A),
-            border = BorderStroke(1.dp, Color(0xFF334155))
-        ) {
-            Column(Modifier.padding(12.dp)) {
-                Text(
-                    text = "🌱 Reset your attention",
-                    color = Color(0xFFE2E8F0),
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 13.sp
-                )
-                Spacer(Modifier.height(3.dp))
-                Text(
-                    text = "Drink a glass of water, stretch your back, or tackle one of your priority tasks while waiting.",
-                    color = Color(0xFF94A3B8),
-                    fontSize = 12.sp,
-                    lineHeight = 17.sp
-                )
-            }
-        }
-
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(20.dp))
 
         if (isFinished) {
             Button(

@@ -461,7 +461,7 @@ class FocusGuardAccessibilityService : AccessibilityService() {
 
         // Secondary continuous defense: actively enforce cooldown for any monitored app in foreground
         // Zero-battery optimization: ONLY queries rootInActiveWindow if an app is currently in cooldown
-        if (cooldownManager.hasActiveCooldowns()) {
+        if (cooldownManager.hasActiveCooldowns() && !isTransitioningToHome()) {
             try {
                 val topPkg = rootInActiveWindow?.packageName?.toString()
                 if (topPkg != null && !isIgnoredTransientPackage(topPkg)) {
