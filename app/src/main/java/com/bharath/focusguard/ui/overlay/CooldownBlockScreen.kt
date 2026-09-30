@@ -54,10 +54,6 @@ fun CooldownBlockScreen(
     val totalCooldownMillis = 10 * 60_000f
     val progress = (remainingMillis / totalCooldownMillis).coerceIn(0f, 1f)
 
-    val minutes = (remainingMillis / 1000) / 60
-    val seconds = (remainingMillis / 1000) % 60
-    val formattedTime = String.format("%02d:%02d", minutes, seconds)
-
     OverlayScaffold {
         // Icon Header with gentle amber/orange glow
         Box(
@@ -117,7 +113,7 @@ fun CooldownBlockScreen(
 
         Spacer(Modifier.height(18.dp))
 
-        // Big Digital Timer Card
+        // Mindful Pause Status Card (No stressful countdown numbers)
         Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(18.dp),
@@ -132,19 +128,20 @@ fun CooldownBlockScreen(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = if (isFinished) "00:00" else formattedTime,
+                    text = if (isFinished) "✓ Cooldown Complete!" else "⏸️ Mindful Pause in Progress",
                     color = if (isFinished) Color(0xFF34D399) else Color.White,
-                    fontSize = 42.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    fontFamily = FontFamily.Monospace,
-                    letterSpacing = 2.sp
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold
                 )
 
+                Spacer(Modifier.height(6.dp))
+
                 Text(
-                    text = if (isFinished) "Cooldown Complete!" else "until ${app.displayName} unlocks",
-                    color = if (isFinished) Color(0xFF34D399) else Color(0xFF94A3B8),
+                    text = if (isFinished) "Your 10-minute break is finished. Tap below to continue." else "Step away and take a deep breath. FocusGuard will unlock when the pause finishes.",
+                    color = Color(0xFF94A3B8),
                     fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium
+                    textAlign = TextAlign.Center,
+                    lineHeight = 17.sp
                 )
 
                 Spacer(Modifier.height(14.dp))

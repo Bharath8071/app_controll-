@@ -66,6 +66,11 @@ class CooldownManager(context: Context) {
         return getCooldownExpiresAt(packageName) != null
     }
 
+    fun hasActiveCooldowns(): Boolean {
+        val now = System.currentTimeMillis()
+        return inMemoryMap.values.any { it > now }
+    }
+
     fun getRemainingMillis(packageName: String): Long {
         val expiresAt = getCooldownExpiresAt(packageName) ?: return 0L
         return (expiresAt - System.currentTimeMillis()).coerceAtLeast(0L)

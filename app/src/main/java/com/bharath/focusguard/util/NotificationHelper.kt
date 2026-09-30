@@ -34,8 +34,8 @@ object NotificationHelper {
     }
 
     /**
-     * Sub-func 1: Warns the user that the app will close in 1 minute.
-     * Triggered when remaining time hits 1 minute (only for sessions longer than 1 min).
+     * Sub-func 1: Warns the user that the app will close in 30 seconds.
+     * Triggered when remaining time hits 30 seconds.
      */
     fun showClosingWarningNotification(context: Context, appName: String, packageName: String) {
         if (!PermissionUtils.hasNotificationPermission(context)) return
@@ -44,9 +44,9 @@ object NotificationHelper {
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
-            .setContentTitle("⏳ 1 Minute Remaining")
-            .setContentText("$appName will close in 1 minute. Wrap up your activity!")
-            .setStyle(NotificationCompat.BigTextStyle().bigText("$appName will close in 1 minute. FocusGuard will return you to Home when time is up."))
+            .setContentTitle("⏳ 30 Seconds Remaining")
+            .setContentText("$appName will close in 30 seconds. Wrap up your activity!")
+            .setStyle(NotificationCompat.BigTextStyle().bigText("$appName will close in 30 seconds. FocusGuard will return you to Home when time is up."))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setAutoCancel(true)
