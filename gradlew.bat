@@ -6,6 +6,8 @@ set APP_HOME=%DIRNAME%
 set DEFAULT_JVM_OPTS="-Xmx64m" "-Xms64m"
 
 set JAVA_EXE=java.exe
+if not "%JAVA_HOME%" == "" set JAVA_EXE=%JAVA_HOME%\bin\java.exe
+if exist "%JAVA_EXE%" goto execute
 where %JAVA_EXE% >NUL 2>&1
 if "%ERRORLEVEL%" == "0" goto execute
 

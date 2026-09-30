@@ -50,7 +50,14 @@ fun OnboardingScreen(onDone: () -> Unit) {
 
     var accessibilityGranted by remember { mutableStateOf(PermissionUtils.hasAccessibilityPermission(context)) }
     var overlayGranted by remember { mutableStateOf(PermissionUtils.hasOverlayPermission(context)) }
+    var notificationGranted by remember { mutableStateOf(PermissionUtils.hasNotificationPermission(context)) }
     var adminGranted by remember { mutableStateOf(PermissionUtils.hasDeviceAdminPermission(context)) }
+
+    val notifLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        notificationGranted = isGranted || PermissionUtils.hasNotificationPermission(context)
+    }
 
     // Re-check every time the user returns from system Settings
     DisposableEffect(lifecycleOwner) {
@@ -58,6 +65,7 @@ fun OnboardingScreen(onDone: () -> Unit) {
             if (event == Lifecycle.Event.ON_RESUME) {
                 accessibilityGranted = PermissionUtils.hasAccessibilityPermission(context)
                 overlayGranted = PermissionUtils.hasOverlayPermission(context)
+                notificationGranted = PermissionUtils.hasNotificationPermission(context)
                 adminGranted = PermissionUtils.hasDeviceAdminPermission(context)
             }
         }
@@ -106,7 +114,7 @@ fun OnboardingScreen(onDone: () -> Unit) {
             Spacer(Modifier.height(6.dp))
 
             Text(
-                text = "Set up your focus shield in three quick steps to regain intentional control of your digital time.",
+                text = "Set up your focus shield to regain intentional control of your digital time and attention.",
                 color = Color(0xFF94A3B8),
                 fontSize = 14.sp,
                 lineHeight = 20.sp
@@ -140,10 +148,29 @@ fun OnboardingScreen(onDone: () -> Unit) {
 
             Spacer(Modifier.height(12.dp))
 
-            // Step 3: Anti-Tamper Protection
+            // Step 3: Session Warnings & Alerts
+            PermissionStepCard(
+                icon = "🔔",
+                stepNumber = "STEP 3 (RECOMMENDED)",
+                title = "Session Alerts & Warnings",
+                description = "Warns you 1 minute before your app session closes, and sends minute-by-minute updates during 5-minute emergencies.",
+                isGranted = notificationGranted,
+                actionText = "Allow Notifications ➔",
+                onAction = {
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                        notifLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                    } else {
+                        PermissionUtils.openNotificationSettings(context)
+                    }
+                }
+            )
+
+            Spacer(Modifier.height(12.dp))
+
+            // Step 4: Anti-Tamper Protection
             PermissionStepCard(
                 icon = "🔒",
-                stepNumber = "STEP 3 (RECOMMENDED)",
+                stepNumber = "STEP 4 (RECOMMENDED)",
                 title = "Anti-Tamper Protection",
                 description = "Device Administrator • Stops impulsive or casual uninstalls during moments of weak willpower.",
                 isGranted = adminGranted,

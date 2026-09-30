@@ -15,19 +15,38 @@ import com.bharath.focusguard.data.local.AppDatabase
 import com.bharath.focusguard.data.local.entities.DailyUsage
 import com.bharath.focusguard.data.local.entities.MonitoredApp
 import com.bharath.focusguard.data.local.entities.SessionState
+import com.bharath.focusguard.data.prefs.CooldownManager
+import com.bharath.focusguard.util.NotificationHelper
 import com.bharath.focusguard.util.PermissionUtils
 import kotlinx.coroutines.*
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.ceil
+
+/**
+ * Tracks an active session in memory, including notification flags for 1-minute
+ * closing alerts and per-minute emergency countdown notifications.
+ */
+data class ActiveSessionInfo(
+    val packageName: String,
+    val sessionLengthMinutes: Int,
+    val sessionExpiresAtMillis: Long,
+    val isEmergency: Boolean = false,
+    var hasNotifiedOneMinWarning: Boolean = false,
+    val notifiedEmergencyMinutes: MutableSet<Int> = mutableSetOf()
+)
 
 /**
  * FocusGuard Core Engine.
  *
  * Full-screen App Blocker & Session Enforcer:
  *  - When user leaves a monitored app -> overlay is IMMEDIATELY removed so keyboards & other apps work 100% free.
- *  - When session timer expires -> FORCIBLY EXITS the monitored app to Home and notifies user.
- *  - When daily budget is exhausted -> FORCIBLY EXITS the app to Home, and on re-opening shows full-screen Hard Block overlay with only option to return Home.
+ *  - When session timer expires -> enforces standard 10-minute cooldown blocker, FORCIBLY EXITS the monitored app to Home, and notifies user.
+ *  - During active sessions:
+ *      * Sub-func 1: Sends 1-minute closing warning notification (suppressed if chosen time was 1 min).
+ *      * Sub-func 2: In 5-minute emergency sessions, notifies every minute with remaining time.
+ *  - When daily budget is exhausted -> FORCIBLY EXITS the app to Home, showing full-screen Hard Block overlay.
  *  - Un-killable 1-second ticker on Main Looper ensures timers fire with second-level precision, immune to system interruptions.
  */
 class FocusGuardAccessibilityService : AccessibilityService() {
@@ -35,6 +54,7 @@ class FocusGuardAccessibilityService : AccessibilityService() {
     private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private lateinit var db: AppDatabase
     private lateinit var overlayManager: OverlayManager
+    private lateinit var cooldownManager: CooldownManager
     private val mainHandler = Handler(Looper.getMainLooper())
 
     /** Tracks which package is currently in the foreground. */
@@ -43,8 +63,8 @@ class FocusGuardAccessibilityService : AccessibilityService() {
     /** Tracks the last monitored app package that was opened. */
     private var lastMonitoredPkg: String? = null
 
-    /** In-memory map of active session package -> expiry time in millis. */
-    private val activeSessionMap = ConcurrentHashMap<String, Long>()
+    /** In-memory map of active session package -> ActiveSessionInfo. */
+    private val activeSessionMap = ConcurrentHashMap<String, ActiveSessionInfo>()
 
     /** Timestamp when exit to home was triggered, used to suppress re-entrant events from the dying monitored app. */
     @Volatile
@@ -83,6 +103,9 @@ class FocusGuardAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         db = AppDatabase.getInstance(applicationContext)
+        cooldownManager = CooldownManager.getInstance(applicationContext)
+        NotificationHelper.createNotificationChannel(applicationContext)
+
         overlayManager = OverlayManager(this).also { manager ->
             manager.onEmergencyExtend = { app -> grantEmergencyExtend(app) }
             manager.onGoHomeAction = { exitToHome() }
@@ -105,7 +128,12 @@ class FocusGuardAccessibilityService : AccessibilityService() {
                 val activeList = db.sessionStateDao().getAllActive()
                 for (s in activeList) {
                     if (now < s.sessionExpiresAtMillis) {
-                        activeSessionMap[s.packageName] = s.sessionExpiresAtMillis
+                        activeSessionMap[s.packageName] = ActiveSessionInfo(
+                            packageName = s.packageName,
+                            sessionLengthMinutes = s.sessionLengthMinutes,
+                            sessionExpiresAtMillis = s.sessionExpiresAtMillis,
+                            isEmergency = false
+                        )
                     } else {
                         db.sessionStateDao().endSession(s.packageName)
                     }
@@ -188,11 +216,42 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         val today = todayDateString()
         ensureUsageRow(pkg, today)
 
+        val usage       = db.dailyUsageDao().get(pkg, today)
+        val used        = usage?.minutesUsedToday ?: 0
+        val minutesLeft = (monitored.dailyBudgetMinutes - used).coerceAtLeast(0)
+
+        // ── 0. Check Cooldown Blocker First! ──
+        // Function 2: If the standard 10-minute cooldown is active, block app use immediately!
+        // The user cannot use the app for the next 10 minutes even if they have remaining total time.
+        val cooldownExpiresAt = cooldownManager.getCooldownExpiresAt(pkg)
+        if (cooldownExpiresAt != null && now < cooldownExpiresAt) {
+            withContext(Dispatchers.Main) {
+                overlayManager.showCooldownBlockScreen(
+                    app = monitored,
+                    cooldownExpiresAtMillis = cooldownExpiresAt,
+                    minutesLeft = minutesLeft,
+                    onCooldownFinished = {
+                        serviceScope.launch {
+                            handleMonitoredAppEntered(monitored)
+                        }
+                    }
+                )
+            }
+            return
+        }
+
         // ── 1. Check if there's an ACTIVE, unexpired session window ──
         val session = db.sessionStateDao().getActive(pkg)
         if (session != null && now < session.sessionExpiresAtMillis) {
             // App is unlocked for this session window! Hide overlay and let user use it.
-            activeSessionMap[pkg] = session.sessionExpiresAtMillis
+            if (!activeSessionMap.containsKey(pkg)) {
+                activeSessionMap[pkg] = ActiveSessionInfo(
+                    packageName = pkg,
+                    sessionLengthMinutes = session.sessionLengthMinutes,
+                    sessionExpiresAtMillis = session.sessionExpiresAtMillis,
+                    isEmergency = false
+                )
+            }
             withContext(Dispatchers.Main) {
                 overlayManager.hideAll()
             }
@@ -217,14 +276,9 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         }
 
         // ── 5. Check daily budget from DB ──
-        val usage       = db.dailyUsageDao().get(pkg, today)
-        val used        = usage?.minutesUsedToday ?: 0
-        val minutesLeft = monitored.dailyBudgetMinutes - used
-
         withContext(Dispatchers.Main) {
             if (minutesLeft <= 0) {
                 // ── HARD BLOCK: Daily limit exhausted! ──
-                // Blocker overlay covers the entire app and gives only the option to return home.
                 val canExtend = (usage?.extendUsedToday == false)
                 overlayManager.showHardBlockScreen(monitored, canExtend = canExtend)
             } else {
@@ -244,10 +298,14 @@ class FocusGuardAccessibilityService : AccessibilityService() {
      * Starts an intentional session:
      * - Immediately allocates the chosen minutes to today's DB usage (upfront deduction).
      * - Persists sessionExpiresAtMillis so app remains unlocked until that exact time.
+     * - Clears any existing cooldown for this app.
      * - Hides the overlay and registers session with the 1-second active ticker.
      */
-    fun startSession(monitored: MonitoredApp, minutes: Int) {
+    fun startSession(monitored: MonitoredApp, minutes: Int, isEmergency: Boolean = false) {
         val pkg = monitored.packageName
+        cooldownManager.clearCooldown(pkg)
+        NotificationHelper.cancelSessionNotification(applicationContext, pkg)
+
         serviceScope.launch {
             val now       = System.currentTimeMillis()
             val expiresAt = now + (minutes * 60_000L)
@@ -269,8 +327,13 @@ class FocusGuardAccessibilityService : AccessibilityService() {
                 )
             )
 
-            // Register in in-memory 1-second active ticker
-            activeSessionMap[pkg] = expiresAt
+            // Register in in-memory 1-second active ticker with notification tracking
+            activeSessionMap[pkg] = ActiveSessionInfo(
+                packageName            = pkg,
+                sessionLengthMinutes   = minutes,
+                sessionExpiresAtMillis = expiresAt,
+                isEmergency            = isEmergency
+            )
 
             withContext(Dispatchers.Main) {
                 // Remove overlay so user can use the app
@@ -278,7 +341,8 @@ class FocusGuardAccessibilityService : AccessibilityService() {
 
                 // Display exact closing time
                 val closeStr = fmtTime(expiresAt)
-                showToast("${monitored.displayName} unlocked until $closeStr")
+                val prefix = if (isEmergency) "⚡ Emergency Pass:" else ""
+                showToast("$prefix ${monitored.displayName} unlocked until $closeStr")
             }
         }
     }
@@ -286,14 +350,56 @@ class FocusGuardAccessibilityService : AccessibilityService() {
     /**
      * Checks all active sessions every 1000ms.
      * Guaranteed to fire promptly on the Main Looper.
+     * Also checks and fires session closing warnings and emergency countdown notifications.
      */
     private fun checkActiveSessions() {
         val now = System.currentTimeMillis()
         val expiredPackages = mutableListOf<String>()
 
-        for ((pkg, expiresAt) in activeSessionMap) {
-            if (now >= expiresAt) {
+        for ((pkg, session) in activeSessionMap) {
+            val remainingMillis = session.sessionExpiresAtMillis - now
+            if (remainingMillis <= 0) {
                 expiredPackages.add(pkg)
+                continue
+            }
+
+            // ── Sub-function 1: 1-minute closing warning notification ──
+            // "notifi that the app is going to close before 1 min. if the use use the clofing time as 1 while enter feom the screen 2. don't use the notification in start."
+            // If the user picked 1 minute from screen 2, don't notify at start (sessionLengthMinutes > 1 check).
+            if (!session.isEmergency) {
+                if (session.sessionLengthMinutes > 1 && remainingMillis <= 60_000L && !session.hasNotifiedOneMinWarning) {
+                    session.hasNotifiedOneMinWarning = true
+                    serviceScope.launch {
+                        val monitored = db.monitoredAppDao().getByPackage(pkg)
+                        if (monitored != null) {
+                            NotificationHelper.showClosingWarningNotification(
+                                context = applicationContext,
+                                appName = monitored.displayName,
+                                packageName = pkg
+                            )
+                        }
+                    }
+                }
+            }
+
+            // ── Sub-function 2: Emergency 5-min per-minute notification ──
+            // "while in the emergency 5 min. notify every min that remaining note: only in the 5min emergency."
+            if (session.isEmergency) {
+                val remainingMinutes = ceil(remainingMillis / 60_000.0).toInt().coerceIn(1, 4)
+                if (remainingMinutes !in session.notifiedEmergencyMinutes) {
+                    session.notifiedEmergencyMinutes.add(remainingMinutes)
+                    serviceScope.launch {
+                        val monitored = db.monitoredAppDao().getByPackage(pkg)
+                        if (monitored != null) {
+                            NotificationHelper.showEmergencyRemainingNotification(
+                                context = applicationContext,
+                                appName = monitored.displayName,
+                                packageName = pkg,
+                                minutesRemaining = remainingMinutes
+                            )
+                        }
+                    }
+                }
             }
         }
 
@@ -308,10 +414,13 @@ class FocusGuardAccessibilityService : AccessibilityService() {
 
     /**
      * Called the instant the session countdown expires.
-     * Forcibly exits the monitored app to Home, and notifies the user.
+     * Enforces the standard 10-minute cooldown blocker, forcibly exits the monitored app to Home,
+     * and notifies the user.
      */
     private fun onTimerExpired(pkg: String) {
         activeSessionMap.remove(pkg)
+        NotificationHelper.cancelSessionNotification(applicationContext, pkg)
+
         serviceScope.launch {
             db.sessionStateDao().endSession(pkg)
 
@@ -321,6 +430,9 @@ class FocusGuardAccessibilityService : AccessibilityService() {
             val used        = usage?.minutesUsedToday ?: 0
             val minutesLeft = (monitored.dailyBudgetMinutes - used).coerceAtLeast(0)
 
+            // Function 2: After the session time ends, block the app for standard 10 minutes!
+            val cooldownExpiresAt = cooldownManager.startCooldown(pkg)
+
             withContext(Dispatchers.Main) {
                 val inMonitoredApp = (currentForegroundPkg == pkg || lastMonitoredPkg == pkg)
                 if (inMonitoredApp) {
@@ -328,12 +440,14 @@ class FocusGuardAccessibilityService : AccessibilityService() {
                     if (minutesLeft <= 0) {
                         overlayManager.showHardBlockScreen(monitored, canExtend = canExtend)
                     } else {
-                        overlayManager.showSessionFinishedScreen(
+                        // Dedicated 10-minute Cooldown Block Screen
+                        overlayManager.showCooldownBlockScreen(
                             app = monitored,
+                            cooldownExpiresAtMillis = cooldownExpiresAt,
                             minutesLeft = minutesLeft,
-                            onNewSession = {
-                                overlayManager.showTimePicker(monitored, minutesLeft) { pickedMinutes ->
-                                    startSession(monitored, pickedMinutes)
+                            onCooldownFinished = {
+                                serviceScope.launch {
+                                    handleMonitoredAppEntered(monitored)
                                 }
                             }
                         )
@@ -346,7 +460,7 @@ class FocusGuardAccessibilityService : AccessibilityService() {
                 if (minutesLeft <= 0) {
                     showToast("🔒 Time's up! Daily limit reached for ${monitored.displayName}.")
                 } else {
-                    showToast("⏱️ Session ended for ${monitored.displayName}! ($minutesLeft min left today).")
+                    showToast("⏸️ 10-minute focus break active for ${monitored.displayName}.")
                 }
             }
         }
@@ -379,7 +493,8 @@ class FocusGuardAccessibilityService : AccessibilityService() {
             val today = todayDateString()
             ensureUsageRow(pkg, today)
             db.dailyUsageDao().markExtendUsed(pkg, today)
-            startSession(monitored, 5)
+            // Starts emergency 5-min session with per-minute notifications
+            startSession(monitored, 5, isEmergency = true)
         }
     }
 

@@ -6,9 +6,11 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.Drawable
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -40,6 +42,10 @@ import com.bharath.focusguard.util.PermissionUtils
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
 
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { _ -> }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -47,6 +53,13 @@ class MainActivity : ComponentActivity() {
             startActivity(Intent(this, OnboardingActivity::class.java))
             finish()
             return
+        }
+
+        // Request notification permission at start on Android 13+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (!PermissionUtils.hasNotificationPermission(this)) {
+                notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            }
         }
 
         setContent {
@@ -60,6 +73,13 @@ class MainActivity : ComponentActivity() {
                     packageManager = packageManager,
                     notionToken = token,
                     notionDatabaseId = databaseId,
+                    onRequestNotificationPermission = {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                        } else {
+                            PermissionUtils.openNotificationSettings(this@MainActivity)
+                        }
+                    },
                     onAddApp = { info, budget -> viewModel.addApp(info, packageManager, budget) },
                     onUpdateBudget = viewModel::updateBudget,
                     onRemove = viewModel::removeApp,
@@ -96,6 +116,7 @@ fun MainScreen(
     packageManager: PackageManager,
     notionToken: String,
     notionDatabaseId: String,
+    onRequestNotificationPermission: () -> Unit = {},
     onAddApp: (ApplicationInfo, Int) -> Unit,
     onUpdateBudget: (MonitoredApp, Int) -> Unit,
     onRemove: (MonitoredApp) -> Unit,
@@ -161,6 +182,50 @@ fun MainScreen(
                 .padding(padding)
                 .padding(horizontal = 16.dp)
         ) {
+            val context = androidx.compose.ui.platform.LocalContext.current
+            var hasNotificationAccess by remember { mutableStateOf(PermissionUtils.hasNotificationPermission(context)) }
+
+            // Notification Access Banner (if notifications are disabled)
+            if (!hasNotificationAccess) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    color = Color(0xFFF59E0B).copy(alpha = 0.12f),
+                    border = BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.35f))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("🔔", fontSize = 18.sp)
+                        Spacer(Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "Session Alerts Disabled",
+                                color = Color(0xFFFBBF24),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                            )
+                            Text(
+                                "Enable notifications to receive 1-min warnings and emergency countdowns.",
+                                color = Color(0xFFFDE68A),
+                                fontSize = 11.sp
+                            )
+                        }
+                        TextButton(
+                            onClick = {
+                                onRequestNotificationPermission()
+                                hasNotificationAccess = PermissionUtils.hasNotificationPermission(context)
+                            }
+                        ) {
+                            Text("Enable", color = Color(0xFFFBBF24), fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
             // Summary Dashboard Card
             Surface(
                 modifier = Modifier

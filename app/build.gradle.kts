@@ -12,8 +12,8 @@ android {
         applicationId = "com.bharath.focusguard"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.2-phase1-accessibility"
+        versionCode = 2
+        versionName = "0.3.0"
     }
 
     buildFeatures {

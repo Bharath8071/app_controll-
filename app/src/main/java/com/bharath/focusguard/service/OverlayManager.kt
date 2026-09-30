@@ -20,6 +20,7 @@ import com.bharath.focusguard.data.remote.NotionClient
 import com.bharath.focusguard.data.remote.NotionRepository
 import com.bharath.focusguard.ui.overlay.BlockScreen
 import com.bharath.focusguard.ui.overlay.ChecklistScreen
+import com.bharath.focusguard.ui.overlay.CooldownBlockScreen
 import com.bharath.focusguard.ui.overlay.TamperLockScreen
 import com.bharath.focusguard.ui.overlay.TimePickerScreen
 import com.bharath.focusguard.util.PermissionUtils
@@ -34,6 +35,7 @@ enum class OverlayState {
     CHECKLIST,
     TIME_PICKER,
     SESSION_FINISHED,
+    COOLDOWN_BLOCK,
     HARD_BLOCK,
     TAMPER_LOCK
 }
@@ -64,7 +66,9 @@ class OverlayManager(private val context: Context) {
         currentPackage == pkg && (currentState == OverlayState.CHECKLIST || currentState == OverlayState.TIME_PICKER)
 
     fun isBlocking(pkg: String): Boolean =
-        currentPackage == pkg && (currentState == OverlayState.HARD_BLOCK || currentState == OverlayState.SESSION_FINISHED)
+        currentPackage == pkg && (currentState == OverlayState.HARD_BLOCK ||
+                currentState == OverlayState.SESSION_FINISHED ||
+                currentState == OverlayState.COOLDOWN_BLOCK)
 
     private fun overlayLayoutParams(fullScreenBlocking: Boolean) = WindowManager.LayoutParams(
         WindowManager.LayoutParams.MATCH_PARENT,
@@ -227,6 +231,35 @@ class OverlayManager(private val context: Context) {
                         onEmergencyExtend?.invoke(app)
                     },
                     onNewSession = { }
+                )
+            }
+        }
+        replaceOverlay(view, fullScreenBlocking = true)
+    }
+
+    /**
+     * Displayed after a planned session ends: enforces a standard 10-minute cooldown
+     * before the user can resume using the app, even if daily budget remains.
+     */
+    fun showCooldownBlockScreen(
+        app: MonitoredApp,
+        cooldownExpiresAtMillis: Long,
+        minutesLeft: Int,
+        onCooldownFinished: (() -> Unit)? = null
+    ) {
+        currentState = OverlayState.COOLDOWN_BLOCK
+        currentPackage = app.packageName
+        val view = context.createOverlayComposeView(onBackPressed = { goHome() }) {
+            MaterialTheme {
+                CooldownBlockScreen(
+                    app = app,
+                    cooldownExpiresAtMillis = cooldownExpiresAtMillis,
+                    minutesLeft = minutesLeft,
+                    onGoHome = { goHome() },
+                    onCooldownFinished = {
+                        hideAll()
+                        onCooldownFinished?.invoke()
+                    }
                 )
             }
         }
