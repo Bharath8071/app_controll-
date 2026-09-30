@@ -29,7 +29,9 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Build Debug APK
+        shell: bash
         run: |
+          set -e -o pipefail
           ./gradlew assembleDebug --stacktrace 2>&1 | tee build_log.txt
 
       - name: Upload Build Log

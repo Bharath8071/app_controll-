@@ -466,34 +466,35 @@ class FocusGuardAccessibilityService : AccessibilityService() {
                 val topPkg = rootInActiveWindow?.packageName?.toString()
                 if (topPkg != null && !isIgnoredTransientPackage(topPkg)) {
                     val cooldownExpiry = cooldownManager.getCooldownExpiresAt(topPkg)
-                if (cooldownExpiry != null && now < cooldownExpiry) {
-                    if (!overlayManager.isBlocking(topPkg)) {
-                        serviceScope.launch {
-                            val monitored = db.monitoredAppDao().getByPackage(topPkg)
-                            if (monitored != null && monitored.isEnabled) {
-                                val today = todayDateString()
-                                val usage = db.dailyUsageDao().get(topPkg, today)
-                                val used = usage?.minutesUsedToday ?: 0
-                                val minutesLeft = (monitored.dailyBudgetMinutes - used).coerceAtLeast(0)
-                                withContext(Dispatchers.Main) {
-                                    overlayManager.showCooldownBlockScreen(
-                                        app = monitored,
-                                        cooldownExpiresAtMillis = cooldownExpiry,
-                                        minutesLeft = minutesLeft,
-                                        onCooldownFinished = {
-                                            serviceScope.launch {
-                                                handleMonitoredAppEntered(monitored)
+                    if (cooldownExpiry != null && now < cooldownExpiry) {
+                        if (!overlayManager.isBlocking(topPkg)) {
+                            serviceScope.launch {
+                                val monitored = db.monitoredAppDao().getByPackage(topPkg)
+                                if (monitored != null && monitored.isEnabled) {
+                                    val today = todayDateString()
+                                    val usage = db.dailyUsageDao().get(topPkg, today)
+                                    val used = usage?.minutesUsedToday ?: 0
+                                    val minutesLeft = (monitored.dailyBudgetMinutes - used).coerceAtLeast(0)
+                                    withContext(Dispatchers.Main) {
+                                        overlayManager.showCooldownBlockScreen(
+                                            app = monitored,
+                                            cooldownExpiresAtMillis = cooldownExpiry,
+                                            minutesLeft = minutesLeft,
+                                            onCooldownFinished = {
+                                                serviceScope.launch {
+                                                    handleMonitoredAppEntered(monitored)
+                                                }
                                             }
-                                        }
-                                    )
-                                    exitToHome()
+                                        )
+                                        exitToHome()
+                                    }
                                 }
                             }
                         }
                     }
                 }
+            } catch (e: Exception) {
             }
-        } catch (e: Exception) {
         }
 
         for (pkg in expiredPackages) {
