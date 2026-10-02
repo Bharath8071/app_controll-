@@ -153,7 +153,7 @@ fun OnboardingScreen(onDone: () -> Unit) {
                 icon = "🔔",
                 stepNumber = "STEP 3 (RECOMMENDED)",
                 title = "Session Alerts & Warnings",
-                description = "Warns you 1 minute before your app session closes, and sends minute-by-minute updates during 5-minute emergencies.",
+                description = "Warns you 30 seconds before your app session closes, and sends minute-by-minute updates during 5-minute emergencies.",
                 isGranted = notificationGranted,
                 actionText = "Allow Notifications ➔",
                 onAction = {

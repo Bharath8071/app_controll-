@@ -67,9 +67,19 @@ class MainActivity : ComponentActivity() {
                 val apps by viewModel.monitoredApps.collectAsState()
                 val token by viewModel.notionToken.collectAsState()
                 val databaseId by viewModel.notionDatabaseId.collectAsState()
+
+                // BUG-016 fix: Load installed apps on IO thread to avoid main-thread jank (50-200ms on 200+ app devices)
+                val installedApps by produceState<List<ApplicationInfo>>(initialValue = emptyList()) {
+                    value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        packageManager.getInstalledApplications(PackageManager.GET_META_DATA)
+                            .filter { (it.flags and ApplicationInfo.FLAG_SYSTEM) == 0 }
+                            .sortedBy { it.loadLabel(packageManager).toString().lowercase() }
+                    }
+                }
+
                 MainScreen(
                     apps = apps,
-                    installedApps = getInstalledUserApps(),
+                    installedApps = installedApps,
                     packageManager = packageManager,
                     notionToken = token,
                     notionDatabaseId = databaseId,
@@ -88,11 +98,6 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-
-    private fun getInstalledUserApps(): List<ApplicationInfo> =
-        packageManager.getInstalledApplications(PackageManager.GET_META_DATA)
-            .filter { (it.flags and ApplicationInfo.FLAG_SYSTEM) == 0 }
-            .sortedBy { it.loadLabel(packageManager).toString().lowercase() }
 }
 
 @Composable
@@ -560,6 +565,9 @@ fun EditBudgetDialog(
 ) {
     var text by remember { mutableStateOf(app.dailyBudgetMinutes.toString()) }
     val presets = listOf(30, 45, 60, 90, 120)
+    // BUG-011 fix: parse eagerly so Save button can be disabled for invalid/empty input
+    val parsedMinutes = text.toIntOrNull()
+    val isValid = parsedMinutes != null && parsedMinutes >= 1
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -600,20 +608,31 @@ fun EditBudgetDialog(
                     onValueChange = { text = it.filter(Char::isDigit).take(3) },
                     label = { Text("Budget (minutes)") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    isError = !isValid && text.isNotEmpty(), // show error only if user has typed something invalid
+                    supportingText = {
+                        if (!isValid && text.isNotEmpty()) {
+                            Text("Minimum 1 minute", color = Color(0xFFFB7185), fontSize = 11.sp)
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = Color(0xFF6366F1),
                         unfocusedBorderColor = Color(0xFF334155),
                         focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White
+                        unfocusedTextColor = Color.White,
+                        errorBorderColor = Color(0xFFF43F5E)
                     )
                 )
             }
         },
         confirmButton = {
             Button(
-                onClick = { text.toIntOrNull()?.let { onSave(it) } },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6366F1))
+                onClick = { if (isValid) onSave(parsedMinutes!!) },
+                enabled = isValid, // BUG-011 fix: disable when input is empty or invalid
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF6366F1),
+                    disabledContainerColor = Color(0xFF1E293B)
+                )
             ) {
                 Text("Save Limit")
             }
@@ -776,8 +795,13 @@ private fun NotionSettingsDialog(
 }
 
 private fun drawableToBitmap(drawable: Drawable): Bitmap {
-    val width = if (drawable.intrinsicWidth > 0) drawable.intrinsicWidth else 96
-    val height = if (drawable.intrinsicHeight > 0) drawable.intrinsicHeight else 96
+    // BUG-017 fix: Cap icon dimensions at 96px to prevent loading 22MB+ of adaptive icon bitmaps.
+    // Some adaptive icons declare intrinsic sizes of 432x432px or larger.
+    val maxSize = 96
+    val rawWidth = if (drawable.intrinsicWidth > 0) drawable.intrinsicWidth else maxSize
+    val rawHeight = if (drawable.intrinsicHeight > 0) drawable.intrinsicHeight else maxSize
+    val width = minOf(rawWidth, maxSize)
+    val height = minOf(rawHeight, maxSize)
     val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
     drawable.setBounds(0, 0, canvas.width, canvas.height)

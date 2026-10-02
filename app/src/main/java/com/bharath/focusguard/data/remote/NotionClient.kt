@@ -1,6 +1,6 @@
 package com.bharath.focusguard.data.remote
 
-import com.bharath.focusguard.data.local.entities.NotionTask
+import com.bharath.focusguard.BuildConfig
 import com.google.gson.Gson
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
@@ -13,23 +13,25 @@ object NotionClient {
     val gson: Gson = Gson()
 
     fun create(token: String): NotionApiService {
+        // Auth interceptor: only sets Authorization header.
+        // BUG-020 fix: Notion-Version is declared in @Headers on each endpoint; don't duplicate it here.
         val auth = Interceptor { chain ->
             val request = chain.request().newBuilder()
                 .header("Authorization", "Bearer $token")
-                .header("Notion-Version", "2022-06-28")
                 .build()
             chain.proceed(request)
         }
-        val logging = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BASIC
+        val clientBuilder = OkHttpClient.Builder().addInterceptor(auth)
+        // BUG-008 fix: Only log in debug builds. Bearer token visible in BASIC logs — never log in release.
+        if (BuildConfig.DEBUG) {
+            val logging = HttpLoggingInterceptor().apply {
+                level = HttpLoggingInterceptor.Level.BASIC
+            }
+            clientBuilder.addInterceptor(logging)
         }
-        val client = OkHttpClient.Builder()
-            .addInterceptor(auth)
-            .addInterceptor(logging)
-            .build()
         return Retrofit.Builder()
             .baseUrl(BASE_URL)
-            .client(client)
+            .client(clientBuilder.build())
             .addConverterFactory(GsonConverterFactory.create(gson))
             .build()
             .create(NotionApiService::class.java)

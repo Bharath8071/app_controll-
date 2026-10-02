@@ -18,7 +18,7 @@ import java.util.*
 class DailyResetWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         val db = AppDatabase.getInstance(applicationContext)
-        val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()) // BUG-022 fix: Locale.US
         db.dailyUsageDao().clearOldDays(today)
         return Result.success()
     }

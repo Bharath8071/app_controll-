@@ -50,7 +50,9 @@ class FocusGuardApp : Application() {
     }
 
     private fun scheduleDailyResetWorker() {
-        val request = PeriodicWorkRequestBuilder<DailyResetWorker>(15, TimeUnit.MINUTES).build()
+        // BUG-009 fix: Changed from 15 minutes (96 runs/day!) to 1 day.
+        // Old 15-min interval was the WorkManager minimum, chosen unnecessarily.
+        val request = PeriodicWorkRequestBuilder<DailyResetWorker>(1, TimeUnit.DAYS).build()
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(
             "daily_reset",
             ExistingPeriodicWorkPolicy.KEEP,

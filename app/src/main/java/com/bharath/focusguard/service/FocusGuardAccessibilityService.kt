@@ -73,13 +73,38 @@ class FocusGuardAccessibilityService : AccessibilityService() {
     @Volatile
     private var lastExitToHomeTimeMillis = 0L
 
-    private fun markExitingToHome() {
+    @Volatile
+    private var exitingFromPackage: String? = null
+
+    /** In-memory set of enabled monitored package names for instant zero-DB checks. */
+    private val enabledMonitoredPackages = ConcurrentHashMap.newKeySet<String>()
+
+    /** In-memory set of known launcher package names. */
+    private val launcherPackages = ConcurrentHashMap.newKeySet<String>()
+
+    private fun markExitingToHome(pkg: String? = null) {
         lastExitToHomeTimeMillis = System.currentTimeMillis()
+        exitingFromPackage = pkg ?: currentForegroundPkg ?: lastMonitoredPkg
+        lastMonitoredPkg = null
+        currentForegroundPkg = null
     }
 
-    private fun isTransitioningToHome(): Boolean {
+    private fun clearExitingToHome() {
+        lastExitToHomeTimeMillis = 0L
+        exitingFromPackage = null
+    }
+
+    private fun isTransitioningToHome(forPkg: String? = null): Boolean {
+        if (lastExitToHomeTimeMillis == 0L) return false
         val elapsed = System.currentTimeMillis() - lastExitToHomeTimeMillis
-        return elapsed < 1500L
+        if (elapsed >= 400L) {
+            clearExitingToHome()
+            return false
+        }
+        if (forPkg != null && exitingFromPackage != null) {
+            return forPkg == exitingFromPackage
+        }
+        return true
     }
 
     /** 1-second ticker running on the Main Looper */
@@ -111,7 +136,7 @@ class FocusGuardAccessibilityService : AccessibilityService() {
 
         overlayManager = OverlayManager(this).also { manager ->
             manager.onEmergencyExtend = { app -> grantEmergencyExtend(app) }
-            manager.onGoHomeAction = { exitToHome() }
+            manager.onGoHomeAction = { pkg -> exitToHome(pkg) }
         }
         if (!PermissionUtils.hasOverlayPermission(this)) {
             overlayManager.showTamperLock()
@@ -122,6 +147,21 @@ class FocusGuardAccessibilityService : AccessibilityService() {
             registerReceiver(screenOffReceiver, filter)
         } catch (e: Exception) {
             android.util.Log.e("FocusGuard", "Failed to register screenOffReceiver", e)
+        }
+
+        // Initialize launcher cache
+        refreshLauncherPackages()
+
+        // Cache enabled monitored apps in memory via reactive Flow
+        serviceScope.launch {
+            try {
+                db.monitoredAppDao().getEnabledApps().collect { apps ->
+                    enabledMonitoredPackages.clear()
+                    enabledMonitoredPackages.addAll(apps.map { it.packageName })
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("FocusGuard", "Failed to collect enabled apps", e)
+            }
         }
 
         // Restore any active sessions from Room DB
@@ -161,34 +201,46 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val newPkg = event.packageName?.toString() ?: return
 
-        // 1. If transitioning to home, ignore re-entrant events from dying windows
-        if (isTransitioningToHome()) {
-            return
-        }
-
-        // 2. If screen is locked or keyguard active, dismiss overlay immediately so user is never trapped on lockscreen
+        // 1. If screen is locked or keyguard active, dismiss overlay immediately so user is never trapped on lockscreen
         val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
         if (keyguardManager?.isKeyguardLocked == true) {
             currentForegroundPkg = newPkg
             lastMonitoredPkg = null
+            clearExitingToHome()
             overlayManager.hideAll()
             return
         }
 
-        // 3. Ignore transient system packages (keyboards, system status bar, notifications, volume panels, overlays)
+        // 2. Ignore transient system packages (keyboards, system status bar, notifications, volume panels, overlays)
         if (isIgnoredTransientPackage(newPkg)) {
             return
         }
 
+        // 3. User reached the launcher / home screen! Transition to home is 100% complete!
+        if (isLauncherPackage(newPkg)) {
+            clearExitingToHome()
+            currentForegroundPkg = newPkg
+            lastMonitoredPkg = null
+            serviceScope.launch(Dispatchers.Main) {
+                overlayManager.hideAll()
+            }
+            return
+        }
+
+        // 4. If transitioning to home, ONLY suppress immediate re-entrant echo events
+        // from the specific package that was just exited (during the brief < 400ms transition window).
+        if (isTransitioningToHome(newPkg)) {
+            return
+        }
+
+        // Transition is done or this is a fresh user interaction
+        clearExitingToHome()
         currentForegroundPkg = newPkg
 
         serviceScope.launch {
             val monitored = db.monitoredAppDao().getByPackage(newPkg)
             if (monitored == null || !monitored.isEnabled) {
-                // User navigated to a non-monitored app or launcher
-                if (isLauncherPackage(newPkg)) {
-                    lastMonitoredPkg = null
-                }
+                // User navigated to a non-monitored app
                 withContext(Dispatchers.Main) {
                     overlayManager.hideAll()
                 }
@@ -234,14 +286,47 @@ class FocusGuardAccessibilityService : AccessibilityService() {
                 lower.contains("facemoji")
     }
 
+    private fun refreshLauncherPackages() {
+        try {
+            val homeIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+            val allLaunchers = packageManager.queryIntentActivities(homeIntent, PackageManager.MATCH_ALL)
+            launcherPackages.clear()
+            launcherPackages.addAll(allLaunchers.mapNotNull { it.activityInfo?.packageName })
+        } catch (e: Exception) {
+            android.util.Log.e("FocusGuard", "Failed to query launcher packages", e)
+        }
+    }
+
     private fun isLauncherPackage(pkg: String): Boolean {
+        if (pkg.isBlank()) return false
+        if (launcherPackages.contains(pkg)) return true
         val lower = pkg.lowercase(Locale.ROOT)
-        if (lower.contains("launcher") || lower.contains("home") || lower.contains("nexuslauncher")) {
+        if (lower.contains("nexuslauncher") ||
+            lower.contains("quickstep") ||
+            lower.contains("trebuchet") ||
+            lower.contains("launcher")) {
+            launcherPackages.add(pkg)
             return true
         }
-        val homeIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
-        val resolveInfo = packageManager.resolveActivity(homeIntent, PackageManager.MATCH_DEFAULT_ONLY)
-        return resolveInfo?.activityInfo?.packageName == pkg
+        return false
+    }
+
+    /**
+     * Accurately determines the live foreground package from active accessibility windows,
+     * falling back to currentForegroundPkg.
+     */
+    private fun getLiveForegroundPackage(): String? {
+        try {
+            val rootPkg = rootInActiveWindow?.packageName?.toString()
+            if (rootPkg != null) return rootPkg
+        } catch (e: Exception) {
+        }
+        try {
+            val focusedPkg = windows?.firstOrNull { it.isFocused }?.root?.packageName?.toString()
+            if (focusedPkg != null) return focusedPkg
+        } catch (e: Exception) {
+        }
+        return currentForegroundPkg
     }
 
     /**
@@ -291,6 +376,7 @@ class FocusGuardAccessibilityService : AccessibilityService() {
                     cooldownExpiresAtMillis = cooldownExpiresAt,
                     minutesLeft = minutesLeft,
                     onCooldownFinished = {
+                        cooldownManager.clearCooldown(monitored.packageName)
                         serviceScope.launch {
                             handleMonitoredAppEntered(monitored)
                         }
@@ -459,41 +545,34 @@ class FocusGuardAccessibilityService : AccessibilityService() {
             }
         }
 
-        // Secondary continuous defense: actively enforce cooldown for any monitored app in foreground
-        // Zero-battery optimization: ONLY queries rootInActiveWindow if an app is currently in cooldown
-        if (cooldownManager.hasActiveCooldowns() && !isTransitioningToHome()) {
-            try {
-                val topPkg = rootInActiveWindow?.packageName?.toString()
-                if (topPkg != null && !isIgnoredTransientPackage(topPkg)) {
-                    val cooldownExpiry = cooldownManager.getCooldownExpiresAt(topPkg)
-                    if (cooldownExpiry != null && now < cooldownExpiry) {
-                        if (!overlayManager.isBlocking(topPkg)) {
-                            serviceScope.launch {
-                                val monitored = db.monitoredAppDao().getByPackage(topPkg)
-                                if (monitored != null && monitored.isEnabled) {
-                                    val today = todayDateString()
-                                    val usage = db.dailyUsageDao().get(topPkg, today)
-                                    val used = usage?.minutesUsedToday ?: 0
-                                    val minutesLeft = (monitored.dailyBudgetMinutes - used).coerceAtLeast(0)
-                                    withContext(Dispatchers.Main) {
-                                        overlayManager.showCooldownBlockScreen(
-                                            app = monitored,
-                                            cooldownExpiresAtMillis = cooldownExpiry,
-                                            minutesLeft = minutesLeft,
-                                            onCooldownFinished = {
-                                                serviceScope.launch {
-                                                    handleMonitoredAppEntered(monitored)
-                                                }
-                                            }
-                                        )
-                                        exitToHome()
-                                    }
-                                }
+        // Secondary continuous defense: actively enforce protection for ANY monitored app in foreground
+        // Guaranteed defense even if initial window state change event was dropped or missed.
+        // Uses in-memory enabledMonitoredPackages check (O(1), zero DB query overhead for unmonitored apps)
+        // so it can safely execute EVERY 1 second without delay.
+        if (!isTransitioningToHome()) {
+            val livePkg = getLiveForegroundPackage()
+            if (livePkg != null && enabledMonitoredPackages.contains(livePkg) && !isIgnoredTransientPackage(livePkg) && !isLauncherPackage(livePkg)) {
+                val hasActiveSession = activeSessionMap.containsKey(livePkg)
+                val isOverlayActive = overlayManager.isBlocking(livePkg) || overlayManager.isGating(livePkg)
+
+                if (!hasActiveSession && !isOverlayActive) {
+                    serviceScope.launch {
+                        val monitored = db.monitoredAppDao().getByPackage(livePkg)
+                        if (monitored != null && monitored.isEnabled) {
+                            val session = db.sessionStateDao().getActive(livePkg)
+                            if (session != null && now < session.sessionExpiresAtMillis) {
+                                activeSessionMap[livePkg] = ActiveSessionInfo(
+                                    packageName = livePkg,
+                                    sessionLengthMinutes = session.sessionLengthMinutes,
+                                    sessionExpiresAtMillis = session.sessionExpiresAtMillis,
+                                    isEmergency = false
+                                )
+                            } else {
+                                handleMonitoredAppEntered(monitored)
                             }
                         }
                     }
                 }
-            } catch (e: Exception) {
             }
         }
 
@@ -515,6 +594,10 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         activeSessionMap.remove(pkg)
         NotificationHelper.cancelSessionNotification(applicationContext, pkg)
 
+        // BUG-006 fix: Clear lastMonitoredPkg so isAppInForeground() can't return stale true
+        // for a package the user left before the timer fired.
+        if (lastMonitoredPkg == pkg) lastMonitoredPkg = null
+
         serviceScope.launch {
             db.sessionStateDao().endSession(pkg)
 
@@ -532,21 +615,25 @@ class FocusGuardAccessibilityService : AccessibilityService() {
                 if (inMonitoredApp) {
                     val canExtend = (usage?.extendUsedToday == false)
                     if (minutesLeft <= 0) {
+                        // BUG-001 fix: Layer 2 — forcibly exit to Home before showing overlay
+                        exitToHome(pkg)
                         overlayManager.showHardBlockScreen(monitored, canExtend = canExtend)
                     } else {
+                        // BUG-001 fix: Layer 2 — forcibly exit to Home before showing cooldown overlay
+                        exitToHome(pkg)
                         // Dedicated 10-minute Cooldown Block Screen
                         overlayManager.showCooldownBlockScreen(
                             app = monitored,
                             cooldownExpiresAtMillis = cooldownExpiresAt,
                             minutesLeft = minutesLeft,
                             onCooldownFinished = {
+                                cooldownManager.clearCooldown(monitored.packageName)
                                 serviceScope.launch {
                                     handleMonitoredAppEntered(monitored)
                                 }
                             }
                         )
                     }
-                    exitToHome()
                 } else {
                     overlayManager.hideAll()
                 }
@@ -567,8 +654,8 @@ class FocusGuardAccessibilityService : AccessibilityService() {
      * Tier 3: Direct resolution and launch of the device's default launcher package
      * Tier 4: Delayed verification pass ensuring the user reached the Home screen
      */
-    private fun exitToHome() {
-        markExitingToHome()
+    private fun exitToHome(pkg: String? = null) {
+        markExitingToHome(pkg)
 
         // Tier 1: System Accessibility Global Action Home
         performGlobalAction(GLOBAL_ACTION_HOME)
@@ -603,12 +690,14 @@ class FocusGuardAccessibilityService : AccessibilityService() {
             android.util.Log.e("FocusGuard", "Failed to launch default launcher", e)
         }
 
-        // Tier 4: Re-verify after 350ms - if still focused on a non-home window, trigger GLOBAL_ACTION_HOME again
+        // Tier 4: Re-verify after 350ms - ONLY if we are still transitioning to home
         mainHandler.postDelayed({
             try {
-                val currentPkg = rootInActiveWindow?.packageName?.toString()
-                if (currentPkg != null && !isIgnoredTransientPackage(currentPkg) && !isLauncherPackage(currentPkg)) {
-                    performGlobalAction(GLOBAL_ACTION_HOME)
+                if (isTransitioningToHome()) {
+                    val currentPkg = rootInActiveWindow?.packageName?.toString()
+                    if (currentPkg != null && !isIgnoredTransientPackage(currentPkg) && !isLauncherPackage(currentPkg)) {
+                        performGlobalAction(GLOBAL_ACTION_HOME)
+                    }
                 }
             } catch (e: Exception) {
             }
@@ -641,7 +730,9 @@ class FocusGuardAccessibilityService : AccessibilityService() {
     }
 
     private fun todayDateString(): String =
-        SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        // BUG-022 fix: Use Locale.US to ensure consistent yyyy-MM-dd keys across all device locales
+        // (Locale.getDefault() can produce Hijri/Persian dates on Middle Eastern devices).
+        SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
 
     private fun fmtTime(millis: Long): String =
         DateFormat.getTimeFormat(applicationContext).format(Date(millis))
@@ -662,6 +753,7 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         }
         mainHandler.removeCallbacks(timerRunnable)
         activeSessionMap.clear()
+        overlayManager.cancelScope() // BUG-019 fix: cancel OverlayManager's coroutine scope
         serviceScope.cancel()
         super.onDestroy()
     }

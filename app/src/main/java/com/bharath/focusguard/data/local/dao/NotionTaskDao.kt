@@ -23,4 +23,15 @@ interface NotionTaskDao {
 
     @Query("DELETE FROM notion_tasks")
     suspend fun clearAll()
+
+    /**
+     * BUG-015 fix: Atomically replace all tasks in a single transaction.
+     * Prevents the checklist cache from being permanently empty if the process
+     * is killed between clearAll() and upsertAll().
+     */
+    @Transaction
+    suspend fun replaceAll(tasks: List<NotionTask>) {
+        clearAll()
+        upsertAll(tasks)
+    }
 }

@@ -81,5 +81,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun today(): String =
-        SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        // BUG-022 fix: Locale.US ensures consistent yyyy-MM-dd keys regardless of device locale
+        SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
 }

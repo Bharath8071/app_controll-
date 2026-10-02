@@ -26,8 +26,7 @@ class NotionRepository(
                     priorityRank = extractPriorityRank(page)
                 )
             }
-            dao.clearAll()
-            dao.upsertAll(topTasks)
+            dao.replaceAll(topTasks) // BUG-015 fix: atomic clear + upsert in a single transaction
         } catch (e: Exception) {
             // Notion unreachable — checklist overlay shows last cached state.
         }

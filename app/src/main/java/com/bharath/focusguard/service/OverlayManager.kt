@@ -60,15 +60,20 @@ class OverlayManager(private val context: Context) {
         private set
 
     var onEmergencyExtend: ((MonitoredApp) -> Unit)? = null
-    var onGoHomeAction: (() -> Unit)? = null
+    var onGoHomeAction: ((String?) -> Unit)? = null
 
     fun isGating(pkg: String): Boolean =
         currentPackage == pkg && (currentState == OverlayState.CHECKLIST || currentState == OverlayState.TIME_PICKER)
 
+    // BUG-018 fix: Include TAMPER_LOCK so it's recognized as blocking and won't be replaced.
     fun isBlocking(pkg: String): Boolean =
         currentPackage == pkg && (currentState == OverlayState.HARD_BLOCK ||
                 currentState == OverlayState.SESSION_FINISHED ||
-                currentState == OverlayState.COOLDOWN_BLOCK)
+                currentState == OverlayState.COOLDOWN_BLOCK) ||
+                currentState == OverlayState.TAMPER_LOCK
+
+    // BUG-019 fix: Allow the AccessibilityService to cancel this scope in onDestroy().
+    fun cancelScope() = scope.cancel()
 
     private fun overlayLayoutParams(fullScreenBlocking: Boolean) = WindowManager.LayoutParams(
         WindowManager.LayoutParams.MATCH_PARENT,
@@ -184,8 +189,17 @@ class OverlayManager(private val context: Context) {
     }
 
     /**
-     * Displayed when a user's planned session ends, but they still have daily budget left.
+     * FLAW-002 fix: This method is superseded by the CooldownBlockScreen flow.
+     * Per spec, after ANY planned session ends the user always enters a 10-minute cooldown
+     * (via showCooldownBlockScreen), not this screen. Once the cooldown ends, 
+     * handleMonitoredAppEntered() re-evaluates and routes to checklist/picker if budget remains.
+     *
+     * This method is preserved for potential future use (e.g., a "quick re-enter" bypass for
+     * premium users) but is NOT part of the current enforcement flow.
+     *
+     * Currently called: NOWHERE (intentionally - the cooldown flow replaced it)
      */
+    @Suppress("unused")
     fun showSessionFinishedScreen(
         app: MonitoredApp,
         minutesLeft: Int,
@@ -249,6 +263,7 @@ class OverlayManager(private val context: Context) {
     ) {
         currentState = OverlayState.COOLDOWN_BLOCK
         currentPackage = app.packageName
+        var finishedHandled = false
         val view = context.createOverlayComposeView(onBackPressed = { goHome() }) {
             MaterialTheme {
                 CooldownBlockScreen(
@@ -257,8 +272,11 @@ class OverlayManager(private val context: Context) {
                     minutesLeft = minutesLeft,
                     onGoHome = { goHome() },
                     onCooldownFinished = {
-                        hideAll()
-                        onCooldownFinished?.invoke()
+                        if (!finishedHandled) {
+                            finishedHandled = true
+                            hideAll()
+                            onCooldownFinished?.invoke()
+                        }
                     }
                 )
             }
@@ -295,8 +313,9 @@ class OverlayManager(private val context: Context) {
 
     fun goHome() {
         runOnMain {
+            val pkg = currentPackage
             try {
-                onGoHomeAction?.invoke()
+                onGoHomeAction?.invoke(pkg)
             } catch (e: Exception) {
                 android.util.Log.e("FocusGuard", "Failed to invoke onGoHomeAction", e)
             }
