@@ -67,6 +67,7 @@ class MainActivity : ComponentActivity() {
                 val apps by viewModel.monitoredApps.collectAsState()
                 val token by viewModel.notionToken.collectAsState()
                 val databaseId by viewModel.notionDatabaseId.collectAsState()
+                val controllerEnabled by viewModel.controllerEnabled.collectAsState()
 
                 // BUG-016 fix: Load installed apps on IO thread to avoid main-thread jank (50-200ms on 200+ app devices)
                 val installedApps by produceState<List<ApplicationInfo>>(initialValue = emptyList()) {
@@ -83,6 +84,8 @@ class MainActivity : ComponentActivity() {
                     packageManager = packageManager,
                     notionToken = token,
                     notionDatabaseId = databaseId,
+                    controllerEnabled = controllerEnabled,
+                    onSetControllerEnabled = viewModel::setControllerEnabled,
                     onRequestNotificationPermission = {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                             notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
@@ -121,6 +124,8 @@ fun MainScreen(
     packageManager: PackageManager,
     notionToken: String,
     notionDatabaseId: String,
+    controllerEnabled: Boolean = true,
+    onSetControllerEnabled: (Boolean) -> Unit = {},
     onRequestNotificationPermission: () -> Unit = {},
     onAddApp: (ApplicationInfo, Int) -> Unit,
     onUpdateBudget: (MonitoredApp, Int) -> Unit,
@@ -151,11 +156,14 @@ fun MainScreen(
                     }
                 },
                 actions = {
-                    // Shield status pill
+                    // Shield status pill — reflects live controller enabled/disabled state
+                    val pillColor = if (controllerEnabled) Color(0xFF10B981) else Color(0xFFF59E0B)
+                    val pillLabel = if (controllerEnabled) "Shield Active" else "Shield Paused"
+                    val pillEmoji = if (controllerEnabled) "🟢" else "⏸️"
                     Surface(
                         shape = CircleShape,
-                        color = Color(0xFF10B981).copy(alpha = 0.15f),
-                        border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.4f)),
+                        color = pillColor.copy(alpha = 0.15f),
+                        border = BorderStroke(1.dp, pillColor.copy(alpha = 0.4f)),
                         modifier = Modifier.padding(end = 16.dp)
                     ) {
                         Row(
@@ -165,12 +173,12 @@ fun MainScreen(
                             Box(
                                 modifier = Modifier
                                     .size(8.dp)
-                                    .background(Color(0xFF10B981), CircleShape)
+                                    .background(pillColor, CircleShape)
                             )
                             Spacer(Modifier.width(6.dp))
                             Text(
-                                "Shield Active",
-                                color = Color(0xFF34D399),
+                                pillLabel,
+                                color = if (controllerEnabled) Color(0xFF34D399) else Color(0xFFFBBF24),
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold
                             )
@@ -294,6 +302,59 @@ fun MainScreen(
                             else -> Color(0xFF10B981)
                         },
                         trackColor = Color(0xFF0F172A)
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            // ── App Controller Master Toggle ──────────────────────────────────────
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                color = if (controllerEnabled) Color(0xFF1E293B) else Color(0xFF1C1410),
+                border = BorderStroke(
+                    1.dp,
+                    if (controllerEnabled) Color(0xFF10B981).copy(alpha = 0.35f) else Color(0xFFF59E0B).copy(alpha = 0.35f)
+                )
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        if (controllerEnabled) "🛡️" else "⏸️",
+                        fontSize = 22.sp
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "App Controller",
+                            color = Color.White,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 14.sp
+                        )
+                        Text(
+                            if (controllerEnabled)
+                                "Blocking active — apps are being gated"
+                            else
+                                "Paused until midnight — auto-resumes at 12:00 AM",
+                            color = if (controllerEnabled) Color(0xFF34D399) else Color(0xFFFBBF24),
+                            fontSize = 11.sp
+                        )
+                    }
+                    Switch(
+                        checked = controllerEnabled,
+                        onCheckedChange = { onSetControllerEnabled(it) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = Color(0xFF10B981),
+                            uncheckedThumbColor = Color(0xFF94A3B8),
+                            uncheckedTrackColor = Color(0xFF334155),
+                            uncheckedBorderColor = Color(0xFF475569)
+                        )
                     )
                 }
             }

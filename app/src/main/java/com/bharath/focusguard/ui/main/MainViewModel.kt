@@ -43,6 +43,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val notionToken = prefs.notionToken.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
     val notionDatabaseId = prefs.notionDatabaseId.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
 
+    /**
+     * Live state of the App Controller master switch.
+     * Defaults to true (enabled). When disabled, the accessibility service skips all blocking.
+     * Auto-re-enables at midnight (day rollover detected by the service's 1-second ticker).
+     */
+    val controllerEnabled: StateFlow<Boolean> =
+        prefs.controllerEnabled.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+
+    /**
+     * Toggles the controller on/off.
+     * When turning OFF → records today's date so the service auto-re-enables after midnight.
+     * When turning ON  → clears the disabled-date immediately.
+     */
+    fun setControllerEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            if (enabled) {
+                prefs.enableController()
+            } else {
+                prefs.disableController(today())
+            }
+        }
+    }
+
     fun addApp(info: ApplicationInfo, pm: PackageManager, budgetMinutes: Int = 60) {
         viewModelScope.launch {
             db.monitoredAppDao().upsert(

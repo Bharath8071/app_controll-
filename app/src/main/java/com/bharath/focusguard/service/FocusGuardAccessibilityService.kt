@@ -17,6 +17,7 @@ import com.bharath.focusguard.data.local.entities.DailyUsage
 import com.bharath.focusguard.data.local.entities.MonitoredApp
 import com.bharath.focusguard.data.local.entities.SessionState
 import com.bharath.focusguard.data.prefs.CooldownManager
+import com.bharath.focusguard.data.prefs.UserPreferences
 import com.bharath.focusguard.util.NotificationHelper
 import com.bharath.focusguard.util.PermissionUtils
 import kotlinx.coroutines.*
@@ -56,7 +57,16 @@ class FocusGuardAccessibilityService : AccessibilityService() {
     private lateinit var db: AppDatabase
     private lateinit var overlayManager: OverlayManager
     private lateinit var cooldownManager: CooldownManager
+    private lateinit var prefs: UserPreferences
     private val mainHandler = Handler(Looper.getMainLooper())
+
+    /**
+     * In-memory mirror of UserPreferences.controllerEnabled, kept in sync via a reactive Flow.
+     * Checked on every accessibility event (O(1), zero IO).
+     * Defaults to true so no blocking is skipped before the first prefs read completes.
+     */
+    @Volatile
+    private var controllerActive: Boolean = true
 
     /** Tracks which package is currently in the foreground. */
     @Volatile
@@ -132,6 +142,7 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         db = AppDatabase.getInstance(applicationContext)
         cooldownManager = CooldownManager.getInstance(applicationContext)
+        prefs = UserPreferences(applicationContext)
         NotificationHelper.createNotificationChannel(applicationContext)
 
         overlayManager = OverlayManager(this).also { manager ->
@@ -161,6 +172,48 @@ class FocusGuardAccessibilityService : AccessibilityService() {
                 }
             } catch (e: Exception) {
                 android.util.Log.e("FocusGuard", "Failed to collect enabled apps", e)
+            }
+        }
+
+        // Mirror controller enabled state into the fast in-memory flag (O(1) per accessibility event)
+        serviceScope.launch {
+            try {
+                prefs.controllerEnabled.collect { enabled ->
+                    controllerActive = enabled
+                    if (enabled) {
+                        // Controller was just re-enabled; make sure overlay is dismissed if we
+                        // are not in a monitored app right now.
+                        val livePkg = getLiveForegroundPackage()
+                        if (livePkg == null || !enabledMonitoredPackages.contains(livePkg)) {
+                            withContext(Dispatchers.Main) { overlayManager.hideAll() }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("FocusGuard", "Failed to collect controllerEnabled", e)
+            }
+        }
+
+        // Auto-re-enable at midnight: check if disabledUntilDate no longer matches today's date.
+        // The 1-second ticker causes a date check via todayDateString() every second, but we
+        // only write to DataStore when actually needed (day rollover), so this is very cheap.
+        serviceScope.launch {
+            try {
+                prefs.disabledUntilDate.collect { disabledDate ->
+                    if (disabledDate.isNotEmpty() && !controllerActive) {
+                        val today = todayDateString()
+                        if (today != disabledDate) {
+                            // A new day has started — auto-re-enable the controller
+                            android.util.Log.i("FocusGuard", "Midnight passed — auto-enabling App Controller")
+                            prefs.enableController()
+                            withContext(Dispatchers.Main) {
+                                showToast("🛡️ App Controller auto-enabled for the new day")
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("FocusGuard", "Failed to collect disabledUntilDate", e)
             }
         }
 
@@ -200,6 +253,12 @@ class FocusGuardAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val newPkg = event.packageName?.toString() ?: return
+
+        // 0. Master switch — if the controller is disabled, dismiss any active overlay and skip blocking.
+        if (!controllerActive) {
+            serviceScope.launch(Dispatchers.Main) { overlayManager.hideAll() }
+            return
+        }
 
         // 1. If screen is locked or keyguard active, dismiss overlay immediately so user is never trapped on lockscreen
         val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
@@ -498,6 +557,9 @@ class FocusGuardAccessibilityService : AccessibilityService() {
      * Also checks and fires session closing warnings and emergency countdown notifications.
      */
     private fun checkActiveSessions() {
+        // Master switch — skip all session enforcement when the controller is disabled
+        if (!controllerActive) return
+
         val now = System.currentTimeMillis()
         val expiredPackages = mutableListOf<String>()
 
