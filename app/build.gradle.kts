@@ -9,8 +9,10 @@ android {
     compileSdk = 34
 
     signingConfigs {
-        // Phase 0: persistent debug keystore so CI APKs update in place.
-        create("debug") {
+        // Phase 0: point AGP's built-in "debug" signing config at the committed
+        // keystore so CI APKs share one signature and update in place.
+        // (Creating a new config named "debug" fails: AGP already defines one.)
+        getByName("debug") {
             storeFile = rootProject.file("debug.keystore")
             storePassword = "android"
             keyAlias = "androiddebugkey"
