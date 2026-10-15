@@ -11,6 +11,7 @@ import com.bharath.focusguard.ui.theme.FgColor
 
 private val DAY_LABELS = listOf("M", "T", "W", "T", "F", "S", "S")
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WindowEditorDialog(
     initial: BlockWindow? = null,

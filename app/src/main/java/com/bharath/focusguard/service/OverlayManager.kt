@@ -19,6 +19,7 @@ import com.bharath.focusguard.data.prefs.UserPreferences
 import com.bharath.focusguard.data.remote.NotionClient
 import com.bharath.focusguard.data.remote.NotionRepository
 import com.bharath.focusguard.ui.overlay.BlockScreen
+import com.bharath.focusguard.ui.overlay.BlockWindowScreen
 import com.bharath.focusguard.ui.overlay.ChecklistScreen
 import com.bharath.focusguard.ui.overlay.CooldownBlockScreen
 import com.bharath.focusguard.ui.overlay.TamperLockScreen

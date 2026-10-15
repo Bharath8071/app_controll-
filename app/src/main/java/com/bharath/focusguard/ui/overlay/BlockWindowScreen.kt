@@ -47,6 +47,7 @@ fun BlockWindowScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun LeaveEarlySheet(onDismiss: () -> Unit, onEnd: () -> Unit) {
     var waited by remember { mutableStateOf(0) } // 0..20

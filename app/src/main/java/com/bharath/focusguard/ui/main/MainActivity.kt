@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.sp
 import com.bharath.focusguard.data.local.entities.MonitoredApp
 import com.bharath.focusguard.ui.onboarding.OnboardingActivity
 import com.bharath.focusguard.util.PermissionUtils
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
