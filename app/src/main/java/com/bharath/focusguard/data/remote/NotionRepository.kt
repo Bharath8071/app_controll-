@@ -44,6 +44,12 @@ class NotionRepository(
         }
     }
 
+    /** Phase 10: returns true when the token + database ID reach Notion. */
+    suspend fun testConnection(): Boolean = try {
+        api.queryDatabase(databaseId)
+        true
+    } catch (_: Exception) { false }
+
     /**
      * Checks if task is already completed (Status == "Done"/"Completed" OR any checkbox property is true).
      * Matches the logic in the Chrome extension.

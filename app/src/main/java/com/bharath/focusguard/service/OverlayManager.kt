@@ -38,6 +38,7 @@ enum class OverlayState {
     SESSION_FINISHED,
     COOLDOWN_BLOCK,
     HARD_BLOCK,
+    BLOCK_WINDOW,
     TAMPER_LOCK
 }
 
@@ -70,6 +71,7 @@ class OverlayManager(private val context: Context) {
     fun isBlocking(pkg: String): Boolean =
         currentPackage == pkg && (currentState == OverlayState.HARD_BLOCK ||
                 currentState == OverlayState.SESSION_FINISHED ||
+                currentState == OverlayState.BLOCK_WINDOW ||
                 currentState == OverlayState.COOLDOWN_BLOCK) ||
                 currentState == OverlayState.TAMPER_LOCK
 
@@ -279,6 +281,29 @@ class OverlayManager(private val context: Context) {
                             onCooldownFinished?.invoke()
                         }
                     }
+                )
+            }
+        }
+        replaceOverlay(view, fullScreenBlocking = true)
+    }
+
+    fun showBlockWindow(
+        app: MonitoredApp,
+        windowName: String?,
+        untilText: String,
+        progress: Float,
+        breaksLeft: Int,
+        onTakeBreak: () -> Unit,
+        onLeaveEarly: () -> Unit,
+    ) {
+        currentState = OverlayState.BLOCK_WINDOW
+        currentPackage = app.packageName
+        val view = context.createOverlayComposeView(onBackPressed = { goHome() }) {
+            MaterialTheme {
+                BlockWindowScreen(
+                    appName = app.displayName, windowName = windowName, untilText = untilText,
+                    progress = progress, breaksLeft = breaksLeft,
+                    onBackHome = { goHome() }, onTakeBreak = onTakeBreak, onLeaveEarly = onLeaveEarly,
                 )
             }
         }

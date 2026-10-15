@@ -8,6 +8,16 @@ android {
     namespace = "com.bharath.focusguard"
     compileSdk = 34
 
+    signingConfigs {
+        // Phase 0: persistent debug keystore so CI APKs update in place.
+        create("debug") {
+            storeFile = rootProject.file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     defaultConfig {
         applicationId = "com.bharath.focusguard"
         minSdk = 26
@@ -29,6 +39,12 @@ android {
     }
     kotlinOptions {
         jvmTarget = "17"
+    }
+
+    buildTypes {
+        getByName("debug") {
+            signingConfig = signingConfigs.getByName("debug")
+        }
     }
 }
 
@@ -54,4 +70,5 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.9.0")
     implementation("androidx.datastore:datastore-preferences:1.1.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    testImplementation("junit:junit:4.13.2")
 }

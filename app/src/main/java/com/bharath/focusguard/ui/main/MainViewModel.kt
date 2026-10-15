@@ -103,6 +103,51 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // ── Phase 3 + 5: windows, summaries, streak ──
+    val windows: StateFlow<List<com.bharath.focusguard.data.local.entities.BlockWindow>> =
+        db.blockWindowDao().observeAll().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    private val summariesFlow = kotlinx.coroutines.flow.MutableStateFlow<List<com.bharath.focusguard.data.local.entities.DailySummary>>(emptyList())
+    val streakDays: StateFlow<Int> = summariesFlow.combine(db.monitoredAppDao().getAllApps()) { sums, _ ->
+        com.bharath.focusguard.util.WindowLogic.streak(sums)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+
+    var weeklyAppMinutes by androidx.compose.runtime.mutableStateOf<List<com.bharath.focusguard.data.local.entities.AppDaily>>(emptyList())
+        private set
+
+    // ── Phase 6: real phone-wide usage (optional permission; never queried when denied) ──
+    var usageTop by androidx.compose.runtime.mutableStateOf<List<Pair<String, Long>>>(emptyList())
+        private set
+
+    fun loadUsageCard(app: android.app.Application, packages: Set<String>) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val rows = com.bharath.focusguard.util.UsageStatsHelper.queryLast7Days(app, packages)
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { usageTop = rows }
+        }
+    }
+
+    fun refreshStats() {
+        viewModelScope.launch {
+            val today = java.time.LocalDate.now()
+            summariesFlow.value = db.dailySummaryDao().recent(30)
+            weeklyAppMinutes = db.appDailyDao().since(today.minusDays(6).toEpochDay())
+        }
+    }
+
+    fun saveWindow(w: com.bharath.focusguard.data.local.entities.BlockWindow, onDone: () -> Unit = {}) {
+        viewModelScope.launch { db.blockWindowDao().upsert(w); onDone() }
+    }
+    fun deleteWindow(id: Long) { viewModelScope.launch { db.blockWindowDao().deleteById(id) } }
+
+    fun blockNow(minutes: Int) {
+        viewModelScope.launch {
+            val until = System.currentTimeMillis() + minutes * 60_000L
+            db.blockWindowDao().upsert(com.bharath.focusguard.data.local.entities.BlockWindow(
+                name = "Focus block", daysMask = 127, startMinute = 0, endMinute = 0,
+                enabled = true, oneOffUntilEpochMs = until))
+        }
+    }
+
     private fun today(): String =
         // BUG-022 fix: Locale.US ensures consistent yyyy-MM-dd keys regardless of device locale
         SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())

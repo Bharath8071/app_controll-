@@ -10,8 +10,9 @@ import com.bharath.focusguard.data.local.dao.*
 import com.bharath.focusguard.data.local.entities.*
 
 @Database(
-    entities = [MonitoredApp::class, DailyUsage::class, SessionState::class, NotionTask::class],
-    version = 4,
+    entities = [MonitoredApp::class, DailyUsage::class, SessionState::class, NotionTask::class,
+        BlockWindow::class, WindowLog::class, DailySummary::class, AppDaily::class],
+    version = 6,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -19,6 +20,10 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun dailyUsageDao(): DailyUsageDao
     abstract fun sessionStateDao(): SessionStateDao
     abstract fun notionTaskDao(): NotionTaskDao
+    abstract fun blockWindowDao(): BlockWindowDao
+    abstract fun windowLogDao(): WindowLogDao
+    abstract fun dailySummaryDao(): DailySummaryDao
+    abstract fun appDailyDao(): AppDailyDao
 
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null
@@ -68,6 +73,20 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS block_windows (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, name TEXT NOT NULL, daysMask INTEGER NOT NULL, startMinute INTEGER NOT NULL, endMinute INTEGER NOT NULL, enabled INTEGER NOT NULL, oneOffUntilEpochMs INTEGER)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS window_log (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, windowId INTEGER NOT NULL, dateEpochDay INTEGER NOT NULL, endedEarly INTEGER NOT NULL, breaksUsed INTEGER NOT NULL, breakUntilEpochMs INTEGER)")
+            }
+        }
+
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS daily_summary (dateEpochDay INTEGER NOT NULL PRIMARY KEY, budgetMinutes INTEGER NOT NULL, usedMinutes INTEGER NOT NULL, emergencyPassUsed INTEGER NOT NULL, windowsCompleted INTEGER NOT NULL, windowsEndedEarly INTEGER NOT NULL)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS app_daily (dateEpochDay INTEGER NOT NULL, packageName TEXT NOT NULL, minutes INTEGER NOT NULL, PRIMARY KEY(dateEpochDay, packageName))")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase =
             INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -75,7 +94,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "focusguard.db"
                 )
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                 .build().also { INSTANCE = it }
             }
     }

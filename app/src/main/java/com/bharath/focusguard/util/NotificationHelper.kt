@@ -97,4 +97,61 @@ object NotificationHelper {
         } catch (e: Exception) {
         }
     }
+
+    const val CHANNEL_WARNINGS = "focus_guard_warnings"
+    const val CHANNEL_WINDOWS = "focus_guard_windows"
+
+    private fun ensureChannels(context: Context) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            val mgr = context.getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager ?: return
+            mgr.createNotificationChannel(android.app.NotificationChannel(CHANNEL_ID, "Session alerts", android.app.NotificationManager.IMPORTANCE_HIGH))
+            mgr.createNotificationChannel(android.app.NotificationChannel(CHANNEL_WARNINGS, "Warnings", android.app.NotificationManager.IMPORTANCE_HIGH))
+            mgr.createNotificationChannel(android.app.NotificationChannel(CHANNEL_WINDOWS, "Block windows", android.app.NotificationManager.IMPORTANCE_DEFAULT))
+        }
+    }
+
+    fun showPermissionLost(context: Context) {
+        if (!PermissionUtils.hasNotificationPermission(context)) return
+        ensureChannels(context)
+        val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+        val pi = intent?.let { android.app.PendingIntent.getActivity(context, 0, it, android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT) }
+        val n = NotificationCompat.Builder(context, CHANNEL_WARNINGS)
+            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setContentTitle("Accessibility is off. FocusGuard can't block apps.")
+            .setContentText("Tap to open Permissions and turn it back on.")
+            .setContentIntent(pi).setAutoCancel(true).build()
+        try { NotificationManagerCompat.from(context).notify(9001, n) } catch (_: Exception) {}
+    }
+
+    fun showBudgetLow(context: Context, appName: String, packageName: String) {
+        if (!PermissionUtils.hasNotificationPermission(context)) return
+        ensureChannels(context)
+        val n = NotificationCompat.Builder(context, CHANNEL_WARNINGS)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle("5 minutes left in your daily budget.")
+            .setContentText("$appName: 5 minutes left.")
+            .setAutoCancel(true).build()
+        try { NotificationManagerCompat.from(context).notify(getNotificationId(packageName) + 500, n) } catch (_: Exception) {}
+    }
+
+    fun showBlockStartingSoon(context: Context, windowName: String) {
+        if (!PermissionUtils.hasNotificationPermission(context)) return
+        ensureChannels(context)
+        val n = NotificationCompat.Builder(context, CHANNEL_WINDOWS)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle("$windowName starts in 5 minutes.")
+            .setContentText("Your apps will close when the block starts.")
+            .setAutoCancel(true).build()
+        try { NotificationManagerCompat.from(context).notify(9100 + windowName.hashCode() % 100, n) } catch (_: Exception) {}
+    }
+
+    fun showBlockEnded(context: Context, windowName: String) {
+        if (!PermissionUtils.hasNotificationPermission(context)) return
+        ensureChannels(context)
+        val n = NotificationCompat.Builder(context, CHANNEL_WINDOWS)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle("$windowName is over. Your apps are open again.")
+            .setAutoCancel(true).build()
+        try { NotificationManagerCompat.from(context).notify(9200 + windowName.hashCode() % 100, n) } catch (_: Exception) {}
+    }
 }

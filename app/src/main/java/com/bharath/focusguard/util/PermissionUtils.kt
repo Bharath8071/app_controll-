@@ -96,5 +96,43 @@ object PermissionUtils {
         }.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         context.startActivity(intent)
     }
+
+    fun isBatteryUnrestricted(context: Context): Boolean {
+        val pm = context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+        return pm.isIgnoringBatteryOptimizations(context.packageName)
+    }
+
+    fun requestBatteryUnrestricted(context: Context) {
+        try {
+            context.startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${context.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (_: Exception) {
+            context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
+    }
+
+    fun hasUsageAccess(context: Context): Boolean {
+        return try {
+            val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as android.app.AppOpsManager
+            val mode = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                appOps.unsafeCheckOpNoThrow("android:get_usage_stats", android.os.Process.myUid(), context.packageName)
+            } else {
+                @Suppress("DEPRECATION") appOps.checkOpNoThrow("android:get_usage_stats", android.os.Process.myUid(), context.packageName)
+            }
+            mode == android.app.AppOpsManager.MODE_ALLOWED
+        } catch (_: Exception) { false }
+    }
+
+    fun requestUsageAccess(context: Context) {
+        context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
+    data class PermRow(val id: String, val critical: Boolean)
+
+    fun criticalMissing(context: Context): List<String> {
+        val out = mutableListOf<String>()
+        if (!hasAccessibilityPermission(context)) out += "Accessibility is off. FocusGuard can't block apps."
+        if (!hasOverlayPermission(context)) out += "Display over other apps is off."
+        return out
+    }
 }
 

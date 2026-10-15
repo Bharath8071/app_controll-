@@ -64,6 +64,13 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             FocusGuardTheme {
+                var showPerms by remember { mutableStateOf(false) }
+                var tab by remember { mutableStateOf(0) }
+                var showEditor by remember { mutableStateOf(false) }
+                var showBlockNow by remember { mutableStateOf(false) }
+                if (showPerms) {
+                    PermissionHealthScreen(onBack = { showPerms = false })
+                } else {
                 val apps by viewModel.monitoredApps.collectAsState()
                 val token by viewModel.notionToken.collectAsState()
                 val databaseId by viewModel.notionDatabaseId.collectAsState()
@@ -96,9 +103,52 @@ class MainActivity : ComponentActivity() {
                     onAddApp = { info, budget -> viewModel.addApp(info, packageManager, budget) },
                     onUpdateBudget = viewModel::updateBudget,
                     onRemove = viewModel::removeApp,
-                    onSaveNotion = viewModel::saveNotion
+                    onSaveNotion = viewModel::saveNotion,
+                    onOpenPermissions = { showPerms = true },
+                    currentTab = tab,
+                    onTab = { tab = it },
+                    windows = viewModel.windows.collectAsState().value,
+                    streak = viewModel.streakDays.collectAsState().value,
+                    weekly = viewModel.weeklyAppMinutes,
+                    budgetPerDay = apps.sumOf { it.app.dailyBudgetMinutes },
+                    onToggleWindow = { viewModel.saveWindow(it) },
+                    onDeleteWindow = { viewModel.deleteWindow(it) },
+                    onAddWindow = { showEditor = true },
+                    onBlockNow = { showBlockNow = true },
+                    usageGranted = PermissionUtils.hasUsageAccess(this@MainActivity),
+                    usageTop = viewModel.usageTop,
+                    onRequestUsage = { PermissionUtils.requestUsageAccess(this@MainActivity) },
                 )
+                if (showEditor) {
+                    WindowEditorDialog(existing = viewModel.windows.collectAsState().value,
+                        onDismiss = { showEditor = false },
+                        onSave = { viewModel.saveWindow(it) { showEditor = false } })
+                }
+                if (showBlockNow) {
+                    AlertDialog(onDismissRequest = { showBlockNow = false }, title = { Text("Block now") },
+                        text = { Text("Start a focus block immediately.") },
+                        confirmButton = {
+                            Column {
+                                listOf(30, 60, 120).forEach { m ->
+                                    TextButton(onClick = { viewModel.blockNow(m); showBlockNow = false }) { Text("$m min") }
+                                }
+                            }
+                        },
+                        dismissButton = { TextButton(onClick = { showBlockNow = false }) { Text("Cancel") } })
+                }
+                }
             }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        viewModel.refreshStats()
+        viewModel.loadUsageCard(application, viewModel.monitoredApps.value.map { it.app.packageName }.toSet())
+        com.bharath.focusguard.service.WindowAlarmScheduler.rescheduleAll(this)
+        // Phase 2: re-check on resume; fire permission-lost notification if critical missing.
+        if (!PermissionUtils.hasAccessibilityPermission(this) || !PermissionUtils.hasOverlayPermission(this)) {
+            com.bharath.focusguard.util.NotificationHelper.showPermissionLost(this)
         }
     }
 }
@@ -130,7 +180,20 @@ fun MainScreen(
     onAddApp: (ApplicationInfo, Int) -> Unit,
     onUpdateBudget: (MonitoredApp, Int) -> Unit,
     onRemove: (MonitoredApp) -> Unit,
-    onSaveNotion: (String, String, () -> Unit) -> Unit
+    onSaveNotion: (String, String, () -> Unit) -> Unit,
+    onOpenPermissions: () -> Unit = {},
+    currentTab: Int = 0,    onTab: (Int) -> Unit = {},
+    windows: List<com.bharath.focusguard.data.local.entities.BlockWindow> = emptyList(),
+    streak: Int = 0,
+    weekly: List<com.bharath.focusguard.data.local.entities.AppDaily> = emptyList(),
+    budgetPerDay: Int = 0,
+    onToggleWindow: (com.bharath.focusguard.data.local.entities.BlockWindow) -> Unit = {},
+    onDeleteWindow: (Long) -> Unit = {},
+    onAddWindow: () -> Unit = {},
+    onBlockNow: () -> Unit = {},
+    usageGranted: Boolean = false,
+    usageTop: List<Pair<String, Long>> = emptyList(),
+    onRequestUsage: () -> Unit = {},
 ) {
     var showPicker by remember { mutableStateOf(false) }
     var showNotion by remember { mutableStateOf(false) }
@@ -141,6 +204,13 @@ fun MainScreen(
 
     Scaffold(
         containerColor = Color(0xFF0B0F19),
+        bottomBar = {
+            NavigationBar {
+                NavigationBarItem(selected = currentTab == 0, onClick = { onTab(0) }, label = { Text("Home") }, icon = { Text("H") })
+                NavigationBarItem(selected = currentTab == 1, onClick = { onTab(1) }, label = { Text("Analytics") }, icon = { Text("A") })
+                NavigationBarItem(selected = currentTab == 2, onClick = { onTab(2) }, label = { Text("Settings") }, icon = { Text("S") })
+            }
+        },
         topBar = {
             TopAppBar(
                 title = {
@@ -197,6 +267,21 @@ fun MainScreen(
         ) {
             val context = androidx.compose.ui.platform.LocalContext.current
             var hasNotificationAccess by remember { mutableStateOf(PermissionUtils.hasNotificationPermission(context)) }
+            PermissionBanner(onFix = onOpenPermissions)
+            if (currentTab == 1) {
+                AnalyticsScreen(weekly = weekly, budgetPerDay = budgetPerDay)
+                return@Column
+            }
+            if (currentTab == 2) {
+                BlockWindowsScreen(windows = windows, activeNow = false,
+                    onToggle = onToggleWindow, onDelete = onDeleteWindow, onAdd = onAddWindow)
+                OutlinedButton(onClick = onOpenPermissions, modifier = Modifier.fillMaxWidth()) { Text("Permissions") }
+                return@Column
+            }
+            HomeCards(minutesLeft = (budgetPerDay - apps.sumOf { it.minutesUsedToday }).coerceAtLeast(0),
+                budgetTotal = budgetPerDay, windows = windows, streak = streak,
+                onBlockNow = onBlockNow, onOpenAnalytics = { onTab(1) },
+                usageGranted = usageGranted, usageTop = usageTop, onRequestUsage = onRequestUsage)
 
             // Notification Access Banner (if notifications are disabled)
             if (!hasNotificationAccess) {
@@ -799,6 +884,10 @@ private fun NotionSettingsDialog(
 ) {
     var token by remember { mutableStateOf(initialToken) }
     var databaseId by remember { mutableStateOf(initialDatabaseId) }
+    var testResult by remember { mutableStateOf<Boolean?>(null) }
+    var testing by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val testContext = androidx.compose.ui.platform.LocalContext.current
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = Color(0xFF1E293B),
@@ -839,6 +928,34 @@ private fun NotionSettingsDialog(
                         unfocusedTextColor = Color.White
                     )
                 )
+                Spacer(Modifier.height(10.dp))
+                // Phase 10: Test connection
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedButton(
+                        onClick = {
+                            testing = true; testResult = null
+                            scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                val ok = try {
+                                    val db = com.bharath.focusguard.data.local.AppDatabase.getInstance(testContext)
+                                    com.bharath.focusguard.data.remote.NotionRepository(
+                                        api = com.bharath.focusguard.data.remote.NotionClient.create(token),
+                                        dao = db.notionTaskDao(), databaseId = databaseId
+                                    ).testConnection()
+                                } catch (_: Exception) { false }
+                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                    testing = false; testResult = ok
+                                }
+                            }
+                        },
+                        enabled = token.isNotBlank() && databaseId.isNotBlank() && !testing
+                    ) { Text(if (testing) "Testing…" else "Test connection") }
+                    Spacer(Modifier.width(8.dp))
+                    when (testResult) {
+                        true -> Text("Connected", color = Color(0xFF34D399), fontSize = 13.sp)
+                        false -> Text("Couldn't connect. Check your token and database ID.", color = Color(0xFFFB7185), fontSize = 13.sp)
+                        null -> {}
+                    }
+                }
             }
         },
         confirmButton = {

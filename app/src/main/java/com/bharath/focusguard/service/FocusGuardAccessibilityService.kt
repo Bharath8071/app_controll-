@@ -92,6 +92,9 @@ class FocusGuardAccessibilityService : AccessibilityService() {
     /** In-memory set of known launcher package names. */
     private val launcherPackages = ConcurrentHashMap.newKeySet<String>()
 
+    @Volatile private var wasWindowActive: Boolean = false
+    @Volatile private var lastWindowName: String = "Block"
+
     private fun markExitingToHome(pkg: String? = null) {
         lastExitToHomeTimeMillis = System.currentTimeMillis()
         exitingFromPackage = pkg ?: currentForegroundPkg ?: lastMonitoredPkg
@@ -417,6 +420,33 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         val today = todayDateString()
         ensureUsageRow(pkg, today)
 
+        // ── NEW: Block window check (highest priority) ──
+        val nowDt = java.time.LocalDateTime.now()
+        val windows = try { db.blockWindowDao().getEnabledOnce() } catch (_: Exception) { emptyList() }
+        val active = com.bharath.focusguard.util.WindowLogic.activeWindow(nowDt, windows)
+        if (active != null) {
+            val day = java.time.LocalDate.now().toEpochDay()
+            val log = try { db.windowLogDao().get(active.id, day) } catch (_: Exception) { null }
+            val breakUntil = log?.breakUntilEpochMs ?: 0L
+            if (now >= breakUntil) {
+                if (!overlayManager.isBlocking(pkg)) {
+                    val untilText = android.text.format.DateFormat.getTimeFormat(applicationContext).format(
+                        java.util.Date(windowEndMillis(active, nowDt)))
+                    val total = windowLengthMillis(active); val elapsed = windowElapsedMillis(active, nowDt)
+                    withContext(Dispatchers.Main) {
+                        overlayManager.showBlockWindow(
+                            app = monitored, windowName = active.name.ifBlank { null }, untilText = untilText,
+                            progress = (elapsed.toFloat() / total.coerceAtLeast(1)).coerceIn(0f, 1f),
+                            breaksLeft = if ((log?.breaksUsed ?: 0) >= 1) 0 else 1,
+                            onTakeBreak = { takeWindowBreak(active.id, day) },
+                            onLeaveEarly = { leaveWindowEarly(active.id, day) },
+                        )
+                    }
+                }
+                return
+            }
+        }
+
         val usage       = db.dailyUsageDao().get(pkg, today)
         val used        = usage?.minutesUsedToday ?: 0
         val minutesLeft = (monitored.dailyBudgetMinutes - used).coerceAtLeast(0)
@@ -519,6 +549,21 @@ class FocusGuardAccessibilityService : AccessibilityService() {
             ensureUsageRow(pkg, today)
             db.dailyUsageDao().addMinutes(pkg, today, minutes)
 
+            // Phase 5: stats writes (AppDaily + DailySummary)
+            try {
+                val day = java.time.LocalDate.now().toEpochDay()
+                val inserted = db.appDailyDao().addMinutes(day, pkg, minutes)
+                if (inserted == 0) db.appDailyDao().insertIgnore(com.bharath.focusguard.data.local.entities.AppDaily(day, pkg, minutes))
+                val s = db.dailySummaryDao().get(day)
+                db.dailySummaryDao().upsert((s ?: com.bharath.focusguard.data.local.entities.DailySummary(dateEpochDay = day))
+                    .copy(usedMinutes = (s?.usedMinutes ?: 0) + minutes,
+                        budgetMinutes = (s?.budgetMinutes ?: 0),
+                        emergencyPassUsed = (s?.emergencyPassUsed ?: false) || isEmergency))
+                // Phase 4: budget-low fires once when exactly 5 left
+                val left = monitored.dailyBudgetMinutes - ((db.dailyUsageDao().get(pkg, today)?.minutesUsedToday) ?: 0)
+                if (left == 5) NotificationHelper.showBudgetLow(applicationContext, monitored.displayName, pkg)
+            } catch (_: Exception) {}
+
             // Persist session window
             db.sessionStateDao().upsert(
                 SessionState(
@@ -547,6 +592,7 @@ class FocusGuardAccessibilityService : AccessibilityService() {
                 val closeStr = fmtTime(expiresAt)
                 val prefix = if (isEmergency) "⚡ Emergency Pass:" else ""
                 showToast("$prefix ${monitored.displayName} unlocked until $closeStr")
+                com.bharath.focusguard.widget.FocusGuardWidgetProvider.refreshAll(applicationContext)
             }
         }
     }
@@ -559,6 +605,23 @@ class FocusGuardAccessibilityService : AccessibilityService() {
     private fun checkActiveSessions() {
         // Master switch — skip all session enforcement when the controller is disabled
         if (!controllerActive) return
+
+        // Phase 4: detect window end transitions for the "block ended" notification
+        try {
+            val wins = db.blockWindowDao().getEnabledOnce()
+            // run on IO? checkActiveSessions is on main; do a cheap cached read via serviceScope
+            serviceScope.launch {
+                try {
+                    val w = com.bharath.focusguard.util.WindowLogic.activeWindow(java.time.LocalDateTime.now(), wins)
+                    val was = wasWindowActive
+                    wasWindowActive = w != null
+                    if (was && w == null) {
+                        NotificationHelper.showBlockEnded(applicationContext, lastWindowName.ifBlank { "Block" })
+                    }
+                    if (w != null) lastWindowName = w.name
+                } catch (_: Exception) {}
+            }
+        } catch (_: Exception) { }
 
         val now = System.currentTimeMillis()
         val expiredPackages = mutableListOf<String>()
@@ -621,6 +684,12 @@ class FocusGuardAccessibilityService : AccessibilityService() {
                     serviceScope.launch {
                         val monitored = db.monitoredAppDao().getByPackage(livePkg)
                         if (monitored != null && monitored.isEnabled) {
+                            // Phase 3: window check each tick so a window starting mid-use blocks immediately.
+                            val wins = try { db.blockWindowDao().getEnabledOnce() } catch (_: Exception) { emptyList() }
+                            if (com.bharath.focusguard.util.WindowLogic.activeWindow(java.time.LocalDateTime.now(), wins) != null) {
+                                handleMonitoredAppEntered(monitored)
+                                return@launch
+                            }
                             val session = db.sessionStateDao().getActive(livePkg)
                             if (session != null && now < session.sessionExpiresAtMillis) {
                                 activeSessionMap[livePkg] = ActiveSessionInfo(
@@ -770,8 +839,7 @@ class FocusGuardAccessibilityService : AccessibilityService() {
     // Emergency Extension
     // ─────────────────────────────────────────────────────────
 
-    private fun grantEmergencyExtend(monitored: MonitoredApp) {
-        serviceScope.launch {
+    private fun grantEmergencyExtend(monitored: MonitoredApp) {        serviceScope.launch {
             val pkg   = monitored.packageName
             val today = todayDateString()
             ensureUsageRow(pkg, today)
@@ -779,6 +847,50 @@ class FocusGuardAccessibilityService : AccessibilityService() {
             // Starts emergency 5-min session with per-minute notifications
             startSession(monitored, 5, isEmergency = true)
         }
+    }
+
+    // ── Phase 3: window break / leave-early / timing helpers ──
+    private fun takeWindowBreak(windowId: Long, day: Long) {
+        serviceScope.launch {
+            val existing = try { db.windowLogDao().get(windowId, day) } catch (_: Exception) { null }
+            db.windowLogDao().upsert((existing ?: com.bharath.focusguard.data.local.entities.WindowLog(windowId = windowId, dateEpochDay = day))
+                .copy(breaksUsed = (existing?.breaksUsed ?: 0) + 1, breakUntilEpochMs = System.currentTimeMillis() + 5 * 60_000L))
+            withContext(Dispatchers.Main) { overlayManager.hideAll(); exitToHome(null); com.bharath.focusguard.widget.FocusGuardWidgetProvider.refreshAll(applicationContext) }
+        }
+    }
+
+    private fun leaveWindowEarly(windowId: Long, day: Long) {
+        serviceScope.launch {
+            val existing = try { db.windowLogDao().get(windowId, day) } catch (_: Exception) { null }
+            db.windowLogDao().upsert((existing ?: com.bharath.focusguard.data.local.entities.WindowLog(windowId = windowId, dateEpochDay = day)).copy(endedEarly = true))
+            try {
+                val s = db.dailySummaryDao().get(day)
+                db.dailySummaryDao().upsert((s ?: com.bharath.focusguard.data.local.entities.DailySummary(dateEpochDay = day)).copy(windowsEndedEarly = (s?.windowsEndedEarly ?: 0) + 1))
+            } catch (_: Exception) {}
+            withContext(Dispatchers.Main) { overlayManager.hideAll(); exitToHome(null); com.bharath.focusguard.widget.FocusGuardWidgetProvider.refreshAll(applicationContext) }
+        }
+    }
+
+    private fun windowLengthMillis(w: com.bharath.focusguard.data.local.entities.BlockWindow): Long {
+        val len = if (w.endMinute > w.startMinute) w.endMinute - w.startMinute else (1440 - w.startMinute) + w.endMinute
+        return len * 60_000L
+    }
+
+    private fun windowEndMillis(w: com.bharath.focusguard.data.local.entities.BlockWindow, now: java.time.LocalDateTime): Long {
+        val zone = java.time.ZoneId.systemDefault()
+        return if (w.endMinute > w.startMinute || now.hour * 60 + now.minute >= w.startMinute) {
+            now.toLocalDate().atTime(w.endMinute / 60, w.endMinute % 60).let {
+                if (w.endMinute <= w.startMinute) it.plusDays(1) else it
+            }.atZone(zone).toInstant().toEpochMilli()
+        } else {
+            now.toLocalDate().atTime(w.endMinute / 60, w.endMinute % 60).atZone(zone).toInstant().toEpochMilli()
+        }
+    }
+
+    private fun windowElapsedMillis(w: com.bharath.focusguard.data.local.entities.BlockWindow, now: java.time.LocalDateTime): Long {
+        val total = windowLengthMillis(w)
+        val remaining = (windowEndMillis(w, now) - System.currentTimeMillis()).coerceAtLeast(0L)
+        return (total - remaining).coerceIn(0L, total)
     }
 
     // ─────────────────────────────────────────────────────────

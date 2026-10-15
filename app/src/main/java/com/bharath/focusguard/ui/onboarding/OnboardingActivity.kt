@@ -1,295 +1,186 @@
 package com.bharath.focusguard.ui.onboarding
 
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import com.bharath.focusguard.ui.main.FocusGuardTheme
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import com.bharath.focusguard.data.local.AppDatabase
+import com.bharath.focusguard.data.local.entities.MonitoredApp
+import com.bharath.focusguard.data.prefs.UserPreferences
 import com.bharath.focusguard.ui.main.MainActivity
+import com.bharath.focusguard.ui.theme.FgColor
+import com.bharath.focusguard.ui.theme.FocusGuardLightTheme
 import com.bharath.focusguard.util.PermissionUtils
+import kotlinx.coroutines.launch
 
 class OnboardingActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            FocusGuardTheme {
-                OnboardingScreen(
-                    onDone = {
-                        startActivity(android.content.Intent(this, MainActivity::class.java))
-                        finish()
-                    }
-                )
+            FocusGuardLightTheme {
+                OnboardingFlow(onDone = {
+                    startActivity(android.content.Intent(this, MainActivity::class.java))
+                    finish()
+                })
             }
         }
     }
 }
 
+/** Phase 9: 9 one-decision steps, resumable via DataStore. */
 @Composable
-fun OnboardingScreen(onDone: () -> Unit) {
+fun OnboardingFlow(onDone: () -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val scope = rememberCoroutineScope()
+    val prefs = remember { UserPreferences(context) }
+    val savedStep by prefs.onboardingStep.collectAsState(initial = 0)
+    var step by remember(savedStep) { mutableStateOf(savedStep.coerceIn(0, 8)) }
+    var tick by remember { mutableStateOf(0) }
+    key(tick) {
+        DisposableEffect(lifecycleOwner) {
+            val observer = LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_RESUME) tick++
+            }
+            lifecycleOwner.lifecycle.addObserver(observer)
+            onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        }
+    }
 
-    var accessibilityGranted by remember { mutableStateOf(PermissionUtils.hasAccessibilityPermission(context)) }
-    var overlayGranted by remember { mutableStateOf(PermissionUtils.hasOverlayPermission(context)) }
-    var notificationGranted by remember { mutableStateOf(PermissionUtils.hasNotificationPermission(context)) }
-    var adminGranted by remember { mutableStateOf(PermissionUtils.hasDeviceAdminPermission(context)) }
+    fun advance(to: Int = step + 1) {
+        scope.launch { prefs.setOnboardingStep(to.coerceAtMost(8)) }
+        if (to > 8) {
+            scope.launch { prefs.setOnboardingStep(8) }
+            onDone()
+        } else step = to
+    }
+    fun back() { step = (step - 1).coerceAtLeast(0); scope.launch { prefs.setOnboardingStep(step) } }
 
     val notifLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        notificationGranted = isGranted || PermissionUtils.hasNotificationPermission(context)
-    }
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { advance() }
 
-    // Re-check every time the user returns from system Settings
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                accessibilityGranted = PermissionUtils.hasAccessibilityPermission(context)
-                overlayGranted = PermissionUtils.hasOverlayPermission(context)
-                notificationGranted = PermissionUtils.hasNotificationPermission(context)
-                adminGranted = PermissionUtils.hasDeviceAdminPermission(context)
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-
-    val canProceed = accessibilityGranted && overlayGranted
-
-    Scaffold(
-        containerColor = Color(0xFF0B0F19)
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(horizontal = 20.dp)
-                .verticalScroll(rememberScrollState())
-        ) {
-            Spacer(Modifier.height(24.dp))
-
-            // Branding Header
-            Box(
-                modifier = Modifier
-                    .size(64.dp)
-                    .background(
-                        brush = Brush.radialGradient(
-                            listOf(Color(0xFF6366F1).copy(alpha = 0.35f), Color(0xFF6366F1).copy(alpha = 0.05f))
-                        ),
-                        shape = CircleShape
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("🛡️", fontSize = 32.sp)
-            }
-
-            Spacer(Modifier.height(16.dp))
-
-            Text(
-                text = "Welcome to FocusGuard",
-                color = Color.White,
-                fontSize = 26.sp,
-                fontWeight = FontWeight.Bold
-            )
-
-            Spacer(Modifier.height(6.dp))
-
-            Text(
-                text = "Set up your focus shield to regain intentional control of your digital time and attention.",
-                color = Color(0xFF94A3B8),
-                fontSize = 14.sp,
-                lineHeight = 20.sp
-            )
-
-            Spacer(Modifier.height(24.dp))
-
-            // Step 1: Accessibility Engine
-            PermissionStepCard(
-                icon = "⚡",
-                stepNumber = "STEP 1 (REQUIRED)",
-                title = "Accessibility Engine",
-                description = "Detects when distracting apps like Instagram or YouTube open with zero background battery drain.",
-                isGranted = accessibilityGranted,
-                actionText = "Enable in Settings ➔",
-                onAction = { PermissionUtils.requestAccessibilityPermission(context) }
-            )
-
-            Spacer(Modifier.height(12.dp))
-
-            // Step 2: Overlay Permission
-            PermissionStepCard(
-                icon = "🪟",
-                stepNumber = "STEP 2 (REQUIRED)",
-                title = "Focus Shield Overlay",
-                description = "Draws your priority checklists, countdown timers, and block screens on top of gated apps.",
-                isGranted = overlayGranted,
-                actionText = "Grant Overlay ➔",
-                onAction = { PermissionUtils.requestOverlayPermission(context) }
-            )
-
-            Spacer(Modifier.height(12.dp))
-
-            // Step 3: Session Warnings & Alerts
-            PermissionStepCard(
-                icon = "🔔",
-                stepNumber = "STEP 3 (RECOMMENDED)",
-                title = "Session Alerts & Warnings",
-                description = "Warns you 30 seconds before your app session closes, and sends minute-by-minute updates during 5-minute emergencies.",
-                isGranted = notificationGranted,
-                actionText = "Allow Notifications ➔",
-                onAction = {
+    Column(Modifier.fillMaxSize().padding(20.dp)) {
+        LinearProgressIndicator(progress = { (step + 1) / 9f }, modifier = Modifier.fillMaxWidth(),
+            color = FgColor.Tide, trackColor = FgColor.Line)
+        Spacer(Modifier.height(16.dp))
+        when (step) {
+            0 -> OnboardPage("FocusGuard adds a pause before the apps that pull you in.",
+                "Get started", onNext = { advance() }, showBack = false, onBack = ::back)
+            1 -> OnboardPage("FocusGuard needs Accessibility to notice when you open a monitored app. It doesn't record what you type, and your usage stays on this phone. If you turn on website blocking, it also reads the address in Chrome.",
+                if (PermissionUtils.hasAccessibilityPermission(context)) "Continue" else "Open settings",
+                onNext = { if (PermissionUtils.hasAccessibilityPermission(context)) advance() else PermissionUtils.requestAccessibilityPermission(context) },
+                showBack = true, onBack = ::back)
+            2 -> OnboardPage("This lets FocusGuard show the pause screen on top of apps.",
+                if (PermissionUtils.hasOverlayPermission(context)) "Continue" else "Open settings",
+                onNext = { if (PermissionUtils.hasOverlayPermission(context)) advance() else PermissionUtils.requestOverlayPermission(context) },
+                showBack = true, onBack = ::back)
+            3 -> OnboardPage("Some phones stop background apps. Set FocusGuard to Unrestricted so blocking keeps working. Samsung: check restricted settings. Xiaomi and Oppo: allow autostart.",
+                if (PermissionUtils.isBatteryUnrestricted(context)) "Continue" else "Open settings",
+                onNext = { if (PermissionUtils.isBatteryUnrestricted(context)) advance() else PermissionUtils.requestBatteryUnrestricted(context) },
+                showBack = true, onBack = ::back)
+            4 -> OnboardPage("Get a warning before a session ends.", "Allow",
+                onNext = {
                     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-                        notifLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-                    } else {
-                        PermissionUtils.openNotificationSettings(context)
-                    }
-                }
-            )
-
-            Spacer(Modifier.height(12.dp))
-
-            // Step 4: Anti-Tamper Protection
-            PermissionStepCard(
-                icon = "🔒",
-                stepNumber = "STEP 4 (RECOMMENDED)",
-                title = "Anti-Tamper Protection",
-                description = "Device Administrator • Stops impulsive or casual uninstalls during moments of weak willpower.",
-                isGranted = adminGranted,
-                actionText = "Activate Protection",
-                onAction = { PermissionUtils.requestDeviceAdminPermission(context) }
-            )
-
-            Spacer(Modifier.height(28.dp))
-
-            Button(
-                onClick = onDone,
-                enabled = canProceed,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp),
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF6366F1),
-                    contentColor = Color.White,
-                    disabledContainerColor = Color(0xFF1E293B),
-                    disabledContentColor = Color(0xFF64748B)
-                )
-            ) {
-                Text(
-                    text = if (canProceed) "Enter FocusGuard ➔" else "Complete Required Steps Above",
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 15.sp
-                )
-            }
-
-            Spacer(Modifier.height(24.dp))
+                        if (PermissionUtils.hasNotificationPermission(context)) advance()
+                        else notifLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                    } else advance()
+                }, showBack = true, onBack = ::back, skippable = true, onSkip = { advance() })
+            5 -> OnboardPage("Makes it harder to remove FocusGuard on impulse.", "Turn on",
+                onNext = { if (PermissionUtils.hasDeviceAdminPermission(context)) advance() else PermissionUtils.requestDeviceAdminPermission(context) },
+                showBack = true, onBack = ::back, skippable = true, onSkip = { advance() })
+            6 -> OnboardPage("Turn on usage access to see where your time goes on Home.", "Turn on",
+                onNext = { if (PermissionUtils.hasUsageAccess(context)) advance() else PermissionUtils.requestUsageAccess(context) },
+                showBack = true, onBack = ::back, skippable = true, onSkip = { advance() })
+            7 -> NotionStep(onBack = ::back, onNext = { advance() }, onSkip = { advance() })
+            else -> AppsStep(onBack = ::back, onDone = {
+                scope.launch { prefs.setOnboardingStep(8) }; onDone()
+            })
         }
     }
 }
 
 @Composable
-fun PermissionStepCard(
-    icon: String,
-    stepNumber: String,
-    title: String,
-    description: String,
-    isGranted: Boolean,
-    actionText: String,
-    onAction: () -> Unit
-) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        color = Color(0xFF1E293B),
-        border = BorderStroke(
-            1.dp,
-            if (isGranted) Color(0xFF10B981).copy(alpha = 0.5f) else Color(0xFF334155)
-        )
-    ) {
-        Column(Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(icon, fontSize = 20.sp)
-                Spacer(Modifier.width(10.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        stepNumber,
-                        color = Color(0xFF64748B),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp
-                    )
-                    Text(
-                        title,
-                        color = Color.White,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = if (isGranted) Color(0xFF10B981).copy(alpha = 0.15f) else Color(0xFFF59E0B).copy(alpha = 0.15f),
-                    border = BorderStroke(
-                        1.dp,
-                        if (isGranted) Color(0xFF10B981).copy(alpha = 0.4f) else Color(0xFFF59E0B).copy(alpha = 0.4f)
-                    )
-                ) {
-                    Text(
-                        text = if (isGranted) "Granted ✓" else "Action Needed",
-                        color = if (isGranted) Color(0xFF34D399) else Color(0xFFFBBF24),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
-                }
-            }
+private fun OnboardPage(text: String, action: String, onNext: () -> Unit, showBack: Boolean, onBack: () -> Unit,
+    skippable: Boolean = false, onSkip: () -> Unit = {}) {
+    Text(text, style = MaterialTheme.typography.headlineSmall, color = FgColor.Ink)
+    Spacer(Modifier.height(24.dp))
+    Button(onClick = onNext, modifier = Modifier.fillMaxWidth().height(52.dp),
+        shape = RoundedCornerShape(50), colors = ButtonDefaults.buttonColors(containerColor = FgColor.Ink)) {
+        Text(action)
+    }
+    if (skippable) TextButton(onClick = onSkip, modifier = Modifier.fillMaxWidth()) { Text("Skip for now") }
+    if (showBack) TextButton(onClick = onBack) { Text("Back") }
+}
 
-            Spacer(Modifier.height(8.dp))
+@Composable
+private fun NotionStep(onBack: () -> Unit, onNext: () -> Unit, onSkip: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val prefs = remember { UserPreferences(context) }
+    var token by remember { mutableStateOf("") }
+    var dbId by remember { mutableStateOf("") }
+    Text("Show your top tasks before you open an app.", style = MaterialTheme.typography.headlineSmall, color = FgColor.Ink)
+    Spacer(Modifier.height(12.dp))
+    OutlinedTextField(value = token, onValueChange = { token = it }, label = { Text("Integration token") },
+        visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+    OutlinedTextField(value = dbId, onValueChange = { dbId = it }, label = { Text("Database ID") }, modifier = Modifier.fillMaxWidth())
+    Spacer(Modifier.height(12.dp))
+    Button(onClick = {
+        scope.launch { prefs.setNotionCredentials(token, dbId); onNext() }
+    }, modifier = Modifier.fillMaxWidth(), enabled = token.isNotBlank() && dbId.isNotBlank()) { Text("Connect") }
+    TextButton(onClick = onSkip, modifier = Modifier.fillMaxWidth()) { Text("Skip") }
+    TextButton(onClick = onBack) { Text("Back") }
+}
 
-            Text(
-                description,
-                color = Color(0xFF94A3B8),
-                fontSize = 12.sp,
-                lineHeight = 17.sp
-            )
-
-            if (!isGranted) {
-                Spacer(Modifier.height(12.dp))
-                Button(
-                    onClick = onAction,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(40.dp),
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF334155),
-                        contentColor = Color.White
-                    )
-                ) {
-                    Text(actionText, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                }
+@Composable
+private fun AppsStep(onBack: () -> Unit, onDone: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var query by remember { mutableStateOf("") }
+    val installed by produceState<List<ApplicationInfo>>(emptyList()) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            context.packageManager.getInstalledApplications(PackageManager.GET_META_DATA)
+                .filter { (it.flags and ApplicationInfo.FLAG_SYSTEM) == 0 }
+                .sortedBy { it.loadLabel(context.packageManager).toString().lowercase() }
+        }
+    }
+    val picked = remember { mutableStateMapOf<String, Boolean>() }
+    Text("Pick monitored apps and set the daily budget.", style = MaterialTheme.typography.headlineSmall, color = FgColor.Ink)
+    OutlinedTextField(value = query, onValueChange = { query = it }, label = { Text("Search apps") }, modifier = Modifier.fillMaxWidth())
+    LazyColumn(Modifier.weight(1f)) {
+        items(installed.filter { it.loadLabel(context.packageManager).toString().contains(query, ignoreCase = true) }.take(40),
+            key = { it.packageName }) { info ->
+            Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = picked[info.packageName] == true,
+                    onCheckedChange = { picked[info.packageName] = it })
+                Text(info.loadLabel(context.packageManager).toString(), Modifier.weight(1f), color = FgColor.Ink)
             }
         }
     }
+    Button(onClick = {
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val db = AppDatabase.getInstance(context)
+            picked.filterValues { it }.keys.forEach { pkg ->
+                val info = installed.firstOrNull { it.packageName == pkg } ?: return@forEach
+                db.monitoredAppDao().upsert(MonitoredApp(pkg, info.loadLabel(context.packageManager).toString(), 60, true))
+            }
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { onDone() }
+        }
+    }, modifier = Modifier.fillMaxWidth()) { Text("Done") }
+    TextButton(onClick = onBack) { Text("Back") }
 }

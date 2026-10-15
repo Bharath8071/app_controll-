@@ -57,6 +57,14 @@
         </service>
 
         <!-- Anti-tamper: makes plain uninstall/force-stop harder to do casually -->
+        <receiver android:name=".service.WindowAlertReceiver" android:exported="false" />
+        <receiver android:name=".widget.FocusGuardWidgetProvider" android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_focusguard_info" />
+        </receiver>
+        <activity android:name=".widget.BlockNowActivity" android:theme="@style/Theme.FocusGuard" android:exported="false" />
         <receiver
             android:name=".service.FocusGuardDeviceAdminReceiver"
             android:permission="android.permission.BIND_DEVICE_ADMIN"

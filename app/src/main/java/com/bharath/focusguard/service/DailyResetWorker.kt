@@ -20,6 +20,7 @@ class DailyResetWorker(context: Context, params: WorkerParameters) : CoroutineWo
         val db = AppDatabase.getInstance(applicationContext)
         val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()) // BUG-022 fix: Locale.US
         db.dailyUsageDao().clearOldDays(today)
+        com.bharath.focusguard.widget.FocusGuardWidgetProvider.refreshAll(applicationContext)
         return Result.success()
     }
 }

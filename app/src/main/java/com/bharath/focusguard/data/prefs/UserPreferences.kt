@@ -3,6 +3,7 @@ package com.bharath.focusguard.data.prefs
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
@@ -32,6 +33,12 @@ class UserPreferences(private val context: Context) {
     suspend fun getToken(): String = context.dataStore.data.first()[TOKEN] ?: ""
     suspend fun getDatabaseId(): String = context.dataStore.data.first()[DATABASE_ID] ?: ""
 
+    /** Phase 9: resumable onboarding step (0..8). */
+    val onboardingStep: Flow<Int> = context.dataStore.data.map { it[ONBOARDING_STEP] ?: 0 }
+    suspend fun setOnboardingStep(step: Int) {
+        context.dataStore.edit { prefs -> prefs[ONBOARDING_STEP] = step }
+    }
+
     suspend fun setNotionCredentials(token: String, databaseId: String) {
         context.dataStore.edit { prefs ->
             prefs[TOKEN] = token.trim()
@@ -60,5 +67,6 @@ class UserPreferences(private val context: Context) {
         private val DATABASE_ID = stringPreferencesKey("notion_database_id")
         private val CONTROLLER_ENABLED = booleanPreferencesKey("controller_enabled")
         private val DISABLED_UNTIL_DATE = stringPreferencesKey("disabled_until_date")
+        private val ONBOARDING_STEP = intPreferencesKey("onboarding_step")
     }
 }
