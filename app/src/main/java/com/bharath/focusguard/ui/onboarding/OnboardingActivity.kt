@@ -1,4 +1,4 @@
-package com.bharath.focusguard.ui.onboarding
+﻿package com.bharath.focusguard.ui.onboarding
 
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
@@ -148,7 +148,7 @@ private fun NotionStep(onBack: () -> Unit, onNext: () -> Unit, onSkip: () -> Uni
 }
 
 @Composable
-private fun AppsStep(onBack: () -> Unit, onDone: () -> Unit) {
+private fun ColumnScope.AppsStep(onBack: () -> Unit, onDone: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var query by remember { mutableStateOf("") }

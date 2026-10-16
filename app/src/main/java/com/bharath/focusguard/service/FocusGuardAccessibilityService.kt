@@ -1,4 +1,4 @@
-package com.bharath.focusguard.service
+﻿package com.bharath.focusguard.service
 
 import android.accessibilityservice.AccessibilityService
 import android.app.KeyguardManager
@@ -137,9 +137,9 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         }
     }
 
-    // ─────────────────────────────────────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Lifecycle
-    // ─────────────────────────────────────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -206,11 +206,11 @@ class FocusGuardAccessibilityService : AccessibilityService() {
                     if (disabledDate.isNotEmpty() && !controllerActive) {
                         val today = todayDateString()
                         if (today != disabledDate) {
-                            // A new day has started — auto-re-enable the controller
-                            android.util.Log.i("FocusGuard", "Midnight passed — auto-enabling App Controller")
+                            // A new day has started â€” auto-re-enable the controller
+                            android.util.Log.i("FocusGuard", "Midnight passed â€” auto-enabling App Controller")
                             prefs.enableController()
                             withContext(Dispatchers.Main) {
-                                showToast("🛡️ App Controller auto-enabled for the new day")
+                                showToast("ðŸ›¡ï¸ App Controller auto-enabled for the new day")
                             }
                         }
                     }
@@ -249,15 +249,15 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         mainHandler.post(timerRunnable)
     }
 
-    // ─────────────────────────────────────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Event Processing
-    // ─────────────────────────────────────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val newPkg = event.packageName?.toString() ?: return
 
-        // 0. Master switch — if the controller is disabled, dismiss any active overlay and skip blocking.
+        // 0. Master switch â€” if the controller is disabled, dismiss any active overlay and skip blocking.
         if (!controllerActive) {
             serviceScope.launch(Dispatchers.Main) { overlayManager.hideAll() }
             return
@@ -410,9 +410,9 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         return false
     }
 
-    // ─────────────────────────────────────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Core: handleMonitoredAppEntered
-    // ─────────────────────────────────────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     private suspend fun handleMonitoredAppEntered(monitored: MonitoredApp) {
         val pkg   = monitored.packageName
@@ -420,7 +420,7 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         val today = todayDateString()
         ensureUsageRow(pkg, today)
 
-        // ── NEW: Block window check (highest priority) ──
+        // â”€â”€ NEW: Block window check (highest priority) â”€â”€
         val nowDt = java.time.LocalDateTime.now()
         val windows = try { db.blockWindowDao().getEnabledOnce() } catch (_: Exception) { emptyList() }
         val active = com.bharath.focusguard.util.WindowLogic.activeWindow(nowDt, windows)
@@ -451,7 +451,7 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         val used        = usage?.minutesUsedToday ?: 0
         val minutesLeft = (monitored.dailyBudgetMinutes - used).coerceAtLeast(0)
 
-        // ── 0. Check Cooldown Blocker First! ──
+        // â”€â”€ 0. Check Cooldown Blocker First! â”€â”€
         // Function 2: If the standard 10-minute cooldown is active, block app use immediately!
         // The user cannot use the app for the next 10 minutes even if they have remaining total time.
         val cooldownExpiresAt = cooldownManager.getCooldownExpiresAt(pkg)
@@ -475,7 +475,7 @@ class FocusGuardAccessibilityService : AccessibilityService() {
             return
         }
 
-        // ── 1. Check if there's an ACTIVE, unexpired session window ──
+        // â”€â”€ 1. Check if there's an ACTIVE, unexpired session window â”€â”€
         val session = db.sessionStateDao().getActive(pkg)
         if (session != null && now < session.sessionExpiresAtMillis) {
             // App is unlocked for this session window! Hide overlay and let user use it.
@@ -493,30 +493,30 @@ class FocusGuardAccessibilityService : AccessibilityService() {
             return
         }
 
-        // ── 2. No valid active session. Clean up stale session row if any ──
+        // â”€â”€ 2. No valid active session. Clean up stale session row if any â”€â”€
         if (session != null) {
             db.sessionStateDao().endSession(pkg)
         }
         activeSessionMap.remove(pkg)
 
-        // ── 3. Prevent re-entrant window events from resetting Screen 2 back to Screen 1 ──
+        // â”€â”€ 3. Prevent re-entrant window events from resetting Screen 2 back to Screen 1 â”€â”€
         if (overlayManager.isGating(pkg)) {
             return
         }
 
-        // ── 4. Prevent re-triggering block screen if already displayed ──
+        // â”€â”€ 4. Prevent re-triggering block screen if already displayed â”€â”€
         if (overlayManager.isBlocking(pkg)) {
             return
         }
 
-        // ── 5. Check daily budget from DB ──
+        // â”€â”€ 5. Check daily budget from DB â”€â”€
         withContext(Dispatchers.Main) {
             if (minutesLeft <= 0) {
-                // ── HARD BLOCK: Daily limit exhausted! ──
+                // â”€â”€ HARD BLOCK: Daily limit exhausted! â”€â”€
                 val canExtend = (usage?.extendUsedToday == false)
                 overlayManager.showHardBlockScreen(monitored, canExtend = canExtend)
             } else {
-                // ── GATE: Budget remains. Show checklist → duration picker ──
+                // â”€â”€ GATE: Budget remains. Show checklist â†’ duration picker â”€â”€
                 overlayManager.showChecklistThenPicker(monitored, minutesLeft) { pickedMinutes ->
                     startSession(monitored, pickedMinutes)
                 }
@@ -524,9 +524,9 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         }
     }
 
-    // ─────────────────────────────────────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Session Management
-    // ─────────────────────────────────────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /**
      * Starts an intentional session:
@@ -590,7 +590,7 @@ class FocusGuardAccessibilityService : AccessibilityService() {
 
                 // Display exact closing time
                 val closeStr = fmtTime(expiresAt)
-                val prefix = if (isEmergency) "⚡ Emergency Pass:" else ""
+                val prefix = if (isEmergency) "âš¡ Emergency Pass:" else ""
                 showToast("$prefix ${monitored.displayName} unlocked until $closeStr")
                 com.bharath.focusguard.widget.FocusGuardWidgetProvider.refreshAll(applicationContext)
             }
@@ -603,25 +603,23 @@ class FocusGuardAccessibilityService : AccessibilityService() {
      * Also checks and fires session closing warnings and emergency countdown notifications.
      */
     private fun checkActiveSessions() {
-        // Master switch — skip all session enforcement when the controller is disabled
+        // Master switch â€” skip all session enforcement when the controller is disabled
         if (!controllerActive) return
 
         // Phase 4: detect window end transitions for the "block ended" notification
-        try {
-            val wins = db.blockWindowDao().getEnabledOnce()
-            // run on IO? checkActiveSessions is on main; do a cheap cached read via serviceScope
-            serviceScope.launch {
-                try {
-                    val w = com.bharath.focusguard.util.WindowLogic.activeWindow(java.time.LocalDateTime.now(), wins)
-                    val was = wasWindowActive
-                    wasWindowActive = w != null
-                    if (was && w == null) {
-                        NotificationHelper.showBlockEnded(applicationContext, lastWindowName.ifBlank { "Block" })
-                    }
-                    if (w != null) lastWindowName = w.name
-                } catch (_: Exception) {}
-            }
-        } catch (_: Exception) { }
+        // getEnabledOnce() is a suspend function; must be called inside the coroutine.
+        serviceScope.launch {
+            try {
+                val wins = db.blockWindowDao().getEnabledOnce()
+                val w = com.bharath.focusguard.util.WindowLogic.activeWindow(java.time.LocalDateTime.now(), wins)
+                val was = wasWindowActive
+                wasWindowActive = w != null
+                if (was && w == null) {
+                    NotificationHelper.showBlockEnded(applicationContext, lastWindowName.ifBlank { "Block" })
+                }
+                if (w != null) lastWindowName = w.name
+            } catch (_: Exception) {}
+        }
 
         val now = System.currentTimeMillis()
         val expiredPackages = mutableListOf<String>()
@@ -633,7 +631,7 @@ class FocusGuardAccessibilityService : AccessibilityService() {
                 continue
             }
 
-            // ── Sub-function 1: 30-second closing warning notification ──
+            // â”€â”€ Sub-function 1: 30-second closing warning notification â”€â”€
             if (!session.isEmergency) {
                 if (remainingMillis <= 30_000L && !session.hasNotifiedClosingWarning) {
                     session.hasNotifiedClosingWarning = true
@@ -650,7 +648,7 @@ class FocusGuardAccessibilityService : AccessibilityService() {
                 }
             }
 
-            // ── Sub-function 2: Emergency 5-min per-minute notification ──
+            // â”€â”€ Sub-function 2: Emergency 5-min per-minute notification â”€â”€
             if (session.isEmergency) {
                 val remainingMinutes = ceil(remainingMillis / 60_000.0).toInt().coerceIn(1, 4)
                 if (remainingMinutes !in session.notifiedEmergencyMinutes) {
@@ -746,11 +744,11 @@ class FocusGuardAccessibilityService : AccessibilityService() {
                 if (inMonitoredApp) {
                     val canExtend = (usage?.extendUsedToday == false)
                     if (minutesLeft <= 0) {
-                        // BUG-001 fix: Layer 2 — forcibly exit to Home before showing overlay
+                        // BUG-001 fix: Layer 2 â€” forcibly exit to Home before showing overlay
                         exitToHome(pkg)
                         overlayManager.showHardBlockScreen(monitored, canExtend = canExtend)
                     } else {
-                        // BUG-001 fix: Layer 2 — forcibly exit to Home before showing cooldown overlay
+                        // BUG-001 fix: Layer 2 â€” forcibly exit to Home before showing cooldown overlay
                         exitToHome(pkg)
                         // Dedicated 10-minute Cooldown Block Screen
                         overlayManager.showCooldownBlockScreen(
@@ -770,9 +768,9 @@ class FocusGuardAccessibilityService : AccessibilityService() {
                 }
 
                 if (minutesLeft <= 0) {
-                    showToast("🔒 Time's up! Daily limit reached for ${monitored.displayName}.")
+                    showToast("ðŸ”’ Time's up! Daily limit reached for ${monitored.displayName}.")
                 } else {
-                    showToast("⏸️ 10-minute focus break active for ${monitored.displayName}.")
+                    showToast("â¸ï¸ 10-minute focus break active for ${monitored.displayName}.")
                 }
             }
         }
@@ -835,9 +833,9 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         }, 350L)
     }
 
-    // ─────────────────────────────────────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Emergency Extension
-    // ─────────────────────────────────────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     private fun grantEmergencyExtend(monitored: MonitoredApp) {        serviceScope.launch {
             val pkg   = monitored.packageName
@@ -849,7 +847,7 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         }
     }
 
-    // ── Phase 3: window break / leave-early / timing helpers ──
+    // â”€â”€ Phase 3: window break / leave-early / timing helpers â”€â”€
     private fun takeWindowBreak(windowId: Long, day: Long) {
         serviceScope.launch {
             val existing = try { db.windowLogDao().get(windowId, day) } catch (_: Exception) { null }
@@ -893,9 +891,9 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         return (total - remaining).coerceIn(0L, total)
     }
 
-    // ─────────────────────────────────────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Helpers
-    // ─────────────────────────────────────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     private suspend fun ensureUsageRow(pkg: String, today: String) {
         if (db.dailyUsageDao().get(pkg, today) == null) {

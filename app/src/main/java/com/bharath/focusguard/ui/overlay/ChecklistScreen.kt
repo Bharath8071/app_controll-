@@ -1,8 +1,10 @@
-package com.bharath.focusguard.ui.overlay
+﻿package com.bharath.focusguard.ui.overlay
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -92,6 +94,6 @@ fun OverlayScaffold(
         contentAlignment = Alignment.Center
     ) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp)
-            .verticalScroll(androidx.compose.foundation.rememberScrollState()), content = content)
+            .verticalScroll(rememberScrollState()), content = content)
     }
 }

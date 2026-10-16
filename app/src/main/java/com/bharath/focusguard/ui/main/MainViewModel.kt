@@ -1,4 +1,4 @@
-package com.bharath.focusguard.ui.main
+﻿package com.bharath.focusguard.ui.main
 
 import android.app.Application
 import android.content.pm.ApplicationInfo
@@ -10,6 +10,8 @@ import com.bharath.focusguard.data.local.entities.MonitoredApp
 import com.bharath.focusguard.data.prefs.UserPreferences
 import com.bharath.focusguard.data.remote.NotionClient
 import com.bharath.focusguard.data.remote.NotionRepository
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -53,8 +55,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
      * Toggles the controller on/off.
-     * When turning OFF → records today's date so the service auto-re-enables after midnight.
-     * When turning ON  → clears the disabled-date immediately.
+     * When turning OFF â†’ records today's date so the service auto-re-enables after midnight.
+     * When turning ON  â†’ clears the disabled-date immediately.
      */
     fun setControllerEnabled(enabled: Boolean) {
         viewModelScope.launch {
@@ -103,7 +105,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // ── Phase 3 + 5: windows, summaries, streak ──
+    // â”€â”€ Phase 3 + 5: windows, summaries, streak â”€â”€
     val windows: StateFlow<List<com.bharath.focusguard.data.local.entities.BlockWindow>> =
         db.blockWindowDao().observeAll().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -115,7 +117,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     var weeklyAppMinutes by androidx.compose.runtime.mutableStateOf<List<com.bharath.focusguard.data.local.entities.AppDaily>>(emptyList())
         private set
 
-    // ── Phase 6: real phone-wide usage (optional permission; never queried when denied) ──
+    // â”€â”€ Phase 6: real phone-wide usage (optional permission; never queried when denied) â”€â”€
     var usageTop by androidx.compose.runtime.mutableStateOf<List<Pair<String, Long>>>(emptyList())
         private set
 

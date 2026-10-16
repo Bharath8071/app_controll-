@@ -1,4 +1,4 @@
-package com.bharath.focusguard.ui.main
+﻿package com.bharath.focusguard.ui.main
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
@@ -140,7 +140,7 @@ fun BlockWindowsScreen(
     windows: List<BlockWindow>,
     activeNow: Boolean,
     onToggle: (BlockWindow) -> Unit,
-    onDelete: (BlockWindow) -> Unit,
+    onDelete: (Long) -> Unit,
     onAdd: () -> Unit,
 ) {
     Column(Modifier.fillMaxSize().padding(20.dp)) {
@@ -152,7 +152,7 @@ fun BlockWindowsScreen(
                     Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text(w.name.ifBlank { "Block" }, color = FgColor.Ink)
-                            Text("${w.startMinute / 60}:${"%02d".format(w.startMinute % 60)}–${w.endMinute / 60}:${"%02d".format(w.endMinute % 60)}", color = FgColor.Slate)
+                            Text("${w.startMinute / 60}:${"%02d".format(w.startMinute % 60)}â€“${w.endMinute / 60}:${"%02d".format(w.endMinute % 60)}", color = FgColor.Slate)
                         }
                         if (activeNow) {
                             Text("On", color = FgColor.TideInk)
