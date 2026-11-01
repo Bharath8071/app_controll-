@@ -37,3 +37,4 @@ class BootReceiver : BroadcastReceiver() {
         WindowAlarmScheduler.rescheduleAll(context)
     }
 }
+
