@@ -52,7 +52,12 @@ class FocusGuardApp : Application() {
     private fun scheduleDailyResetWorker() {
         // BUG-009 fix: Changed from 15 minutes (96 runs/day!) to 1 day.
         // Old 15-min interval was the WorkManager minimum, chosen unnecessarily.
-        val request = PeriodicWorkRequestBuilder<DailyResetWorker>(1, TimeUnit.DAYS).build()
+        // BUG-A1 fix: Add constraints so WorkManager doesn't silently skip runs on MIUI/Doze.
+        // setRequiresBatteryNotLow(false) means the job runs even on low battery (we want it).
+        val constraints = Constraints.Builder().setRequiresBatteryNotLow(false).build()
+        val request = PeriodicWorkRequestBuilder<DailyResetWorker>(1, TimeUnit.DAYS)
+            .setConstraints(constraints)
+            .build()
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(
             "daily_reset",
             ExistingPeriodicWorkPolicy.KEEP,

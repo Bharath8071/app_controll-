@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.bharath.focusguard"
-    compileSdk = 34
+    compileSdk = 35
 
     signingConfigs {
         // Phase 0: point AGP's built-in "debug" signing config at the committed
@@ -23,7 +23,7 @@ android {
     defaultConfig {
         applicationId = "com.bharath.focusguard"
         minSdk = 26
-        targetSdk = 34
+        targetSdk = 35
         versionCode = 2
         versionName = "0.3.0"
     }

@@ -24,7 +24,9 @@ fun CooldownBlockScreen(
             val rem = (cooldownExpiresAtMillis - System.currentTimeMillis()).coerceAtLeast(0L)
             remaining = rem
             if (rem <= 0L) break
-            delay(500L)
+            // BUG-C1 fix: Tighten polling interval in the last 2 seconds so the
+            // `Unlock now` button appears with ~100ms latency instead of up to 500ms.
+            delay(if (rem < 2000L) 100L else 500L)
         }
     }
     val total = 10 * 60_000L

@@ -1,4 +1,4 @@
-﻿package com.bharath.focusguard.ui.onboarding
+package com.bharath.focusguard.ui.onboarding
 
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
@@ -89,10 +89,32 @@ fun OnboardingFlow(onDone: () -> Unit) {
                 if (PermissionUtils.hasOverlayPermission(context)) "Continue" else "Open settings",
                 onNext = { if (PermissionUtils.hasOverlayPermission(context)) advance() else PermissionUtils.requestOverlayPermission(context) },
                 showBack = true, onBack = ::back)
-            3 -> OnboardPage("Some phones stop background apps. Set FocusGuard to Unrestricted so blocking keeps working. Samsung: check restricted settings. Xiaomi and Oppo: allow autostart.",
-                if (PermissionUtils.isBatteryUnrestricted(context)) "Continue" else "Open settings",
-                onNext = { if (PermissionUtils.isBatteryUnrestricted(context)) advance() else PermissionUtils.requestBatteryUnrestricted(context) },
-                showBack = true, onBack = ::back)
+            3 -> {
+                // Fix-OEM-4: If this OEM needs autostart, show a two-action page
+                // that covers both battery unrestricted AND autostart in one step.
+                val battOk = PermissionUtils.isBatteryUnrestricted(context)
+                val oemAutostart = PermissionUtils.oemNeedsAutostart()
+                val stepText = if (oemAutostart)
+                    "Some phones stop background apps. Set FocusGuard to Unrestricted battery AND enable ${PermissionUtils.autostartLabel()} so blocking keeps working."
+                else
+                    "Some phones stop background apps. Set FocusGuard to Unrestricted so blocking keeps working."
+                val stepAction = if (!battOk) "Battery: Open settings" else if (oemAutostart) "Autostart: Open settings" else "Continue"
+                OnboardPage(
+                    text = stepText,
+                    action = stepAction,
+                    onNext = {
+                        when {
+                            !battOk -> PermissionUtils.requestBatteryUnrestricted(context)
+                            oemAutostart -> PermissionUtils.requestAutostartPermission(context)
+                            else -> advance()
+                        }
+                    },
+                    showBack = true, onBack = ::back,
+                    // Allow skipping past autostart if user already did it or doesn't want to
+                    skippable = battOk && oemAutostart,
+                    onSkip = { advance() }
+                )
+            }
             4 -> OnboardPage("Get a warning before a session ends.", "Allow",
                 onNext = {
                     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {

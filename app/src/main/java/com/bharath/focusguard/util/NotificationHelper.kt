@@ -11,6 +11,8 @@ object NotificationHelper {
 
     const val CHANNEL_ID = "focus_guard_session_alerts"
     private const val CHANNEL_NAME = "FocusGuard Session Alerts"
+    const val CHANNEL_FOREGROUND = "focus_guard_service"
+    const val NOTIF_ID_FOREGROUND = 1
 
     fun createNotificationChannel(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -24,9 +26,43 @@ object NotificationHelper {
                 enableVibration(true)
                 setShowBadge(true)
             }
+            val fgChannel = NotificationChannel(
+                CHANNEL_FOREGROUND,
+                "FocusGuard Active",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Persistent notification keeping the blocking service alive"
+                setShowBadge(false)
+            }
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
             manager?.createNotificationChannel(channel)
+            manager?.createNotificationChannel(fgChannel)
         }
+    }
+
+    /**
+     * Builds the persistent foreground notification used to keep the
+     * AccessibilityService alive on OEM ROMs (Xiaomi, Oppo, Vivo, Realme, etc.)
+     * that aggressively kill background processes.
+     */
+    fun buildForegroundNotification(context: Context): android.app.Notification {
+        createNotificationChannel(context)
+        val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+        val pi = launchIntent?.let {
+            android.app.PendingIntent.getActivity(
+                context, 100, it,
+                android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
+            )
+        }
+        return NotificationCompat.Builder(context, CHANNEL_FOREGROUND)
+            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setContentTitle("FocusGuard is active")
+            .setContentText("App blocking is running.")
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOngoing(true)
+            .setSilent(true)
+            .setContentIntent(pi)
+            .build()
     }
 
     private fun getNotificationId(packageName: String): Int {
@@ -107,6 +143,7 @@ object NotificationHelper {
             mgr.createNotificationChannel(android.app.NotificationChannel(CHANNEL_ID, "Session alerts", android.app.NotificationManager.IMPORTANCE_HIGH))
             mgr.createNotificationChannel(android.app.NotificationChannel(CHANNEL_WARNINGS, "Warnings", android.app.NotificationManager.IMPORTANCE_HIGH))
             mgr.createNotificationChannel(android.app.NotificationChannel(CHANNEL_WINDOWS, "Block windows", android.app.NotificationManager.IMPORTANCE_DEFAULT))
+            mgr.createNotificationChannel(android.app.NotificationChannel(CHANNEL_FOREGROUND, "FocusGuard Active", android.app.NotificationManager.IMPORTANCE_LOW).also { it.setShowBadge(false) })
         }
     }
 
@@ -114,7 +151,7 @@ object NotificationHelper {
         if (!PermissionUtils.hasNotificationPermission(context)) return
         ensureChannels(context)
         val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
-        val pi = intent?.let { android.app.PendingIntent.getActivity(context, 0, it, android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT) }
+        val pi = intent?.let { android.app.PendingIntent.getActivity(context, 101, it, android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT) }
         val n = NotificationCompat.Builder(context, CHANNEL_WARNINGS)
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
             .setContentTitle("Accessibility is off. FocusGuard can't block apps.")
@@ -142,7 +179,7 @@ object NotificationHelper {
             .setContentTitle("$windowName starts in 5 minutes.")
             .setContentText("Your apps will close when the block starts.")
             .setAutoCancel(true).build()
-        try { NotificationManagerCompat.from(context).notify(9100 + windowName.hashCode() % 100, n) } catch (_: Exception) {}
+        try { NotificationManagerCompat.from(context).notify(9100 + (windowName.hashCode() and 0x7FFFFFFF) % 100, n) } catch (_: Exception) {}
     }
 
     fun showBlockEnded(context: Context, windowName: String) {
@@ -152,6 +189,6 @@ object NotificationHelper {
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle("$windowName is over. Your apps are open again.")
             .setAutoCancel(true).build()
-        try { NotificationManagerCompat.from(context).notify(9200 + windowName.hashCode() % 100, n) } catch (_: Exception) {}
+        try { NotificationManagerCompat.from(context).notify(9200 + (windowName.hashCode() and 0x7FFFFFFF) % 100, n) } catch (_: Exception) {}
     }
 }

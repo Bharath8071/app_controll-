@@ -24,6 +24,7 @@ fun PermissionHealthScreen(onBack: () -> Unit) {
         val notifOn = PermissionUtils.hasNotificationPermission(context)
         val adminOn = PermissionUtils.hasDeviceAdminPermission(context)
         val usageOn = PermissionUtils.hasUsageAccess(context)
+        val showAutostart = PermissionUtils.oemNeedsAutostart()
         Column(Modifier.fillMaxSize().padding(20.dp)) {
             Text("Permissions", style = MaterialTheme.typography.headlineLarge, color = FgColor.Ink)
             Spacer(Modifier.height(12.dp))
@@ -33,6 +34,16 @@ fun PermissionHealthScreen(onBack: () -> Unit) {
             Spacer(Modifier.height(8.dp))
             Text("Recommended", style = MaterialTheme.typography.titleLarge, color = FgColor.Ink)
             PermRowView("Battery unrestricted", "Keeps blocking reliable.", battOk, { PermissionUtils.requestBatteryUnrestricted(context); tick++ })
+            // Fix-OEM-4: Show OEM-specific autostart row for Xiaomi, Oppo, Vivo, Huawei, Samsung
+            if (showAutostart) {
+                PermRowView(
+                    name = PermissionUtils.autostartLabel(),
+                    reason = PermissionUtils.autostartReason(),
+                    // We can't read the autostart state — show as always actionable
+                    on = false,
+                    action = { PermissionUtils.requestAutostartPermission(context); tick++ }
+                )
+            }
             PermRowView("Notifications", "Get a warning before a session ends.", notifOn, { PermissionUtils.openNotificationSettings(context); tick++ })
             PermRowView("Uninstall protection", "Harder to remove on impulse.", adminOn, { PermissionUtils.requestDeviceAdminPermission(context); tick++ })
             Spacer(Modifier.height(8.dp))

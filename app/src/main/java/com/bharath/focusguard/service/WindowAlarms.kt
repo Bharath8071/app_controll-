@@ -5,6 +5,7 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import com.bharath.focusguard.data.local.AppDatabase
 import com.bharath.focusguard.util.NotificationHelper
 import com.bharath.focusguard.util.WindowLogic
@@ -26,10 +27,28 @@ object WindowAlarmScheduler {
                 val next = WindowLogic.nextWindowStart(now, wins) ?: return@launch
                 val triggerAt = next.atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli() - 5 * 60_000L
                 if (triggerAt > System.currentTimeMillis()) {
-                    val pi = PendingIntent.getBroadcast(context, 7001,
+                    val pi = PendingIntent.getBroadcast(
+                        context, 7001,
                         Intent(context, WindowAlertReceiver::class.java).putExtra("kind", "soon"),
-                        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-                    try { am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi) } catch (_: Exception) {}
+                        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                    )
+                    // Fix-API31: setExactAndAllowWhileIdle requires SCHEDULE_EXACT_ALARM on API 31+.
+                    // canScheduleExactAlarms() guards the call; fall back to setAndAllowWhileIdle
+                    // (inexact, ±few minutes) so the notification still fires on restricted devices.
+                    try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            if (am.canScheduleExactAlarms()) {
+                                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
+                            } else {
+                                am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
+                            }
+                        } else {
+                            am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
+                        }
+                    } catch (_: Exception) {
+                        // Last-resort fallback — inexact but won't crash
+                        try { am.set(AlarmManager.RTC_WAKEUP, triggerAt, pi) } catch (_: Exception) {}
+                    }
                 }
             } catch (_: Exception) {}
         }

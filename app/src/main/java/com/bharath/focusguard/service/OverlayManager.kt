@@ -57,9 +57,11 @@ class OverlayManager(private val context: Context) {
     private val db = AppDatabase.getInstance(context)
     private val prefs = UserPreferences(context.applicationContext)
 
-    var currentState: OverlayState = OverlayState.IDLE
+    // BUG-O2 fix: @Volatile ensures cross-thread visibility of these fields.
+    // OverlayManager methods are called from both Main and coroutine threads.
+    @Volatile var currentState: OverlayState = OverlayState.IDLE
         private set
-    var currentPackage: String? = null
+    @Volatile var currentPackage: String? = null
         private set
 
     var onEmergencyExtend: ((MonitoredApp) -> Unit)? = null
@@ -90,7 +92,9 @@ class OverlayManager(private val context: Context) {
             @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_SYSTEM_ALERT,
         (if (fullScreenBlocking) 0 else WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) or
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+            // BUG-O1 fix: Show overlay even during lock screen transition (e.g. after session timeout)`r
+            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED,
         PixelFormat.TRANSLUCENT
     ).apply {
         gravity = Gravity.CENTER

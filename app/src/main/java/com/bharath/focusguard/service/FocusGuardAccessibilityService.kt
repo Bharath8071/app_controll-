@@ -1,4 +1,4 @@
-﻿package com.bharath.focusguard.service
+package com.bharath.focusguard.service
 
 import android.accessibilityservice.AccessibilityService
 import android.app.KeyguardManager
@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.text.format.DateFormat
@@ -128,6 +129,18 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         }
     }
 
+    /**
+     * Fix-OEM-3: Refresh launcher package cache every 5 minutes.
+     * A one-time cache at startup goes stale if the user changes their default launcher
+     * (common on Samsung, Xiaomi where third-party launchers are swapped at runtime).
+     */
+    private val launcherRefreshRunnable = object : Runnable {
+        override fun run() {
+            refreshLauncherPackages()
+            mainHandler.postDelayed(this, 5 * 60_000L)
+        }
+    }
+
     /** BroadcastReceiver to dismiss any active overlay immediately when screen turns off. */
     private val screenOffReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -148,23 +161,52 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         prefs = UserPreferences(applicationContext)
         NotificationHelper.createNotificationChannel(applicationContext)
 
+        // Fix-OEM-1 + Fix-API34: Start as a foreground service so OEM process killers
+        // (Xiaomi, Oppo, Vivo, Realme) treat this service as user-facing and won't
+        // silently terminate it mid-session.
+        // On API 29+ we must pass the foregroundServiceType declared in the manifest.
+        // On API 34+ omitting the type throws ForegroundServiceStartNotAllowedException.
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NotificationHelper.NOTIF_ID_FOREGROUND,
+                    NotificationHelper.buildForegroundNotification(applicationContext),
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                )
+            } else {
+                startForeground(
+                    NotificationHelper.NOTIF_ID_FOREGROUND,
+                    NotificationHelper.buildForegroundNotification(applicationContext)
+                )
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("FocusGuard", "Failed to start foreground", e)
+        }
+
         overlayManager = OverlayManager(this).also { manager ->
             manager.onEmergencyExtend = { app -> grantEmergencyExtend(app) }
             manager.onGoHomeAction = { pkg -> exitToHome(pkg) }
         }
-        if (!PermissionUtils.hasOverlayPermission(this)) {
-            overlayManager.showTamperLock()
-        }
+        // BUG-S5 fix: Removed false-positive tamper-lock trigger.
+        // TYPE_ACCESSIBILITY_OVERLAY (used in OverlayManager) does NOT require SYSTEM_ALERT_WINDOW;
+        // it is automatically granted to accessibility services. Showing the lock screen here
+        // incorrectly blocked users on OEMs that delay granting overlay permission at boot.
 
         try {
             val filter = IntentFilter(Intent.ACTION_SCREEN_OFF)
-            registerReceiver(screenOffReceiver, filter)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(screenOffReceiver, filter, RECEIVER_NOT_EXPORTED)
+            } else {
+                registerReceiver(screenOffReceiver, filter)
+            }
         } catch (e: Exception) {
             android.util.Log.e("FocusGuard", "Failed to register screenOffReceiver", e)
         }
 
-        // Initialize launcher cache
+        // Initialize launcher cache; also schedule periodic refresh (Fix-OEM-3)
         refreshLauncherPackages()
+        mainHandler.removeCallbacks(launcherRefreshRunnable)
+        mainHandler.postDelayed(launcherRefreshRunnable, 5 * 60_000L)
 
         // Cache enabled monitored apps in memory via reactive Flow
         serviceScope.launch {
@@ -254,8 +296,17 @@ class FocusGuardAccessibilityService : AccessibilityService() {
     // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
+        // Accept both STATE_CHANGED (primary) and CONTENT_CHANGED (OEM fallback for Samsung/Xiaomi).
+        // Some OEM ROMs deliver CONTENT_CHANGED instead of STATE_CHANGED on in-app navigation.
+        val eventType = event?.eventType ?: return
+        if (eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
+            eventType != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) return
+
+        // For CONTENT_CHANGED: only process if the source package actually changed foreground.
+        // This prevents excessive re-triggers from scroll/text events within the same app.
         val newPkg = event.packageName?.toString() ?: return
+        if (eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
+            newPkg == currentForegroundPkg) return
 
         // 0. Master switch â€” if the controller is disabled, dismiss any active overlay and skip blocking.
         if (!controllerActive) {
@@ -324,9 +375,18 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         if (pkg == packageName) return true
         if (pkg == "android") return true
         val lower = pkg.lowercase(Locale.ROOT)
+        // BUG-S6 fix: Use precise prefix/suffix checks for OEM transient packages instead
+        // of broad substrings. The old `contains("edge")` matched Microsoft Edge (com.microsoft.emmx)
+        // and `contains("overlay")` matched legitimate apps with "overlay" in their name.
+        // Now we match known OEM system UI packages by exact prefix where possible.
         return lower.contains("systemui") ||
                 lower.contains("notification") ||
-                lower.contains("overlay") ||
+                lower.startsWith("com.samsung.android.edge") ||
+                lower.startsWith("com.sec.android.app.quickpanel") ||
+                lower.startsWith("com.miui.systemui") ||
+                lower.startsWith("com.oppo.systemui") ||
+                lower.startsWith("com.vivo.systemui") ||
+                lower.startsWith("com.realme.systemui") ||
                 lower.contains("inputmethod") ||
                 lower.contains("keyboard") ||
                 lower.contains("honeyboard") ||
@@ -340,7 +400,6 @@ class FocusGuardAccessibilityService : AccessibilityService() {
                 lower.contains("smartcapture") ||
                 lower.contains("screenshot") ||
                 lower.contains("gametools") ||
-                lower.contains("edge") ||
                 lower.contains("sidepanel") ||
                 lower.contains("volume") ||
                 lower.contains("toast") ||
@@ -351,7 +410,7 @@ class FocusGuardAccessibilityService : AccessibilityService() {
     private fun refreshLauncherPackages() {
         try {
             val homeIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
-            val allLaunchers = packageManager.queryIntentActivities(homeIntent, PackageManager.MATCH_ALL)
+            val allLaunchers = packageManager.queryIntentActivities(homeIntent, 0)
             launcherPackages.clear()
             launcherPackages.addAll(allLaunchers.mapNotNull { it.activityInfo?.packageName })
         } catch (e: Exception) {
@@ -479,14 +538,14 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         val session = db.sessionStateDao().getActive(pkg)
         if (session != null && now < session.sessionExpiresAtMillis) {
             // App is unlocked for this session window! Hide overlay and let user use it.
-            if (!activeSessionMap.containsKey(pkg)) {
-                activeSessionMap[pkg] = ActiveSessionInfo(
-                    packageName = pkg,
-                    sessionLengthMinutes = session.sessionLengthMinutes,
-                    sessionExpiresAtMillis = session.sessionExpiresAtMillis,
-                    isEmergency = false
-                )
-            }
+            // BUG-S3 fix: Use putIfAbsent to atomically set only if absent, preventing
+            // a concurrent coroutine from re-adding an already-expired session entry.
+            activeSessionMap.putIfAbsent(pkg, ActiveSessionInfo(
+                packageName = pkg,
+                sessionLengthMinutes = session.sessionLengthMinutes,
+                sessionExpiresAtMillis = session.sessionExpiresAtMillis,
+                isEmergency = false
+            ))
             withContext(Dispatchers.Main) {
                 overlayManager.hideAll()
             }
@@ -924,6 +983,7 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         } catch (e: Exception) {
         }
         mainHandler.removeCallbacks(timerRunnable)
+        mainHandler.removeCallbacks(launcherRefreshRunnable)
         activeSessionMap.clear()
         overlayManager.cancelScope() // BUG-019 fix: cancel OverlayManager's coroutine scope
         serviceScope.cancel()

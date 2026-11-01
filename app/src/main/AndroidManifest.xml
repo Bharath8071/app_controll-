@@ -16,6 +16,39 @@
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
 
+    <!--
+      Fix-OEM-2: Required for startForeground() on the AccessibilityService.
+      Without this the call throws SecurityException on all Android versions.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+
+    <!--
+      Fix-API31: Required for AlarmManager.setExactAndAllowWhileIdle() on API 31+.
+      Without this the alarm is silently downgraded to inexact on Android 12+.
+    -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"
+        tools:ignore="ProtectedPermissions" />
+
+    <!--
+      Fix-API31: Fallback for devices that deny SCHEDULE_EXACT_ALARM.
+      USE_EXACT_ALARM is auto-granted on API 33+ for alarms tied to calendar/reminder use.
+      Declaring both lets the system choose the right grant path per ROM.
+    -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+
+    <!-- Required by WorkManager for reliable background execution -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- RECEIVE_BOOT_COMPLETED so WorkManager and alarms survive device reboots -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!--
+      Fix-API34: Required companion permission for foregroundServiceType="dataSync".
+      Android 14+ enforces that whichever type is declared in the manifest must also have
+      the matching uses-permission. Without this, startForeground() throws on API 34+.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
     <application
         android:name=".FocusGuardApp"
         android:allowBackup="false"
@@ -43,10 +76,19 @@
           from a foreground service; Android calls onAccessibilityEvent()
           the instant a window changes, which is the "check only when the
           app opens" behavior we wanted instead of checking on a timer.
+
+          Fix-OEM-2 / Fix-API34:
+          android:foregroundServiceType="dataSync" is required on Android 14+
+          (targetSdk=34) when calling startForeground() from an AccessibilityService.
+          Without it, startForeground() throws ForegroundServiceStartNotAllowedException
+          on API 34+ devices (Pixel 8, Samsung S24, etc.).
+          "dataSync" is the correct type for a monitoring/blocking service that
+          does not fit the "camera", "location", or "mediaPlayback" categories.
         -->
         <service
             android:name=".service.FocusGuardAccessibilityService"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:foregroundServiceType="dataSync"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />
@@ -58,7 +100,23 @@
 
         <!-- Anti-tamper: makes plain uninstall/force-stop harder to do casually -->
         <receiver android:name=".service.WindowAlertReceiver" android:exported="false" />
-        <receiver android:name=".widget.FocusGuardWidgetProvider" android:exported="false">
+
+        <!--
+          Fix-Boot: Reschedules WorkManager and exact alarms after device reboot.
+          QUICKBOOT_POWERON handles Xiaomi HyperOS / MIUI fast-boot events.
+        -->
+        <receiver android:name=".service.BootReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+
+        <!--
+          Fix-Widget: AppWidget providers that handle APPWIDGET_UPDATE must be exported=true.
+          The system's AppWidget host sends this broadcast and cannot reach unexported receivers.
+        -->
+        <receiver android:name=".widget.FocusGuardWidgetProvider" android:exported="true">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>

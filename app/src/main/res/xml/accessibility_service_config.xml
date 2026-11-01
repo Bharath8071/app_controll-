@@ -1,17 +1,37 @@
 <?xml version="1.0" encoding="utf-8"?>
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accessibilityEventTypes="typeWindowStateChanged"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
-    android:accessibilityFlags="flagRetrieveInteractiveWindows"
+    android:accessibilityFlags="flagRetrieveInteractiveWindows|flagRequestFilterKeyEvents|flagReportViewIds"
     android:canRetrieveWindowContent="false"
-    android:notificationTimeout="100"
+    android:canRequestFilterKeyEvents="true"
+    android:notificationTimeout="50"
+    android:settingsActivity=".ui.main.MainActivity"
     android:description="@string/accessibility_service_description" />
 
 <!--
-  We deliberately only listen for typeWindowStateChanged (which app/window is
-  now in front) — NOT content-reading events. canRetrieveWindowContent is
-  false because FocusGuard has no reason to read screen text, only to know
-  which package is in the foreground. Keeping this minimal is both a privacy
-  choice and makes the Play Console accessibility-usage justification honest
-  if this ever goes past phase 1.
+  Event types:
+    typeWindowStateChanged  — fires when a new app/activity comes to the foreground. Primary trigger.
+    typeWindowContentChanged — secondary fallback for OEMs (Samsung OneUI, Xiaomi MIUI) that sometimes
+                               deliver CONTENT_CHANGED instead of STATE_CHANGED on in-app navigation.
+
+  Flags:
+    flagRetrieveInteractiveWindows — lets us call getWindows() to accurately determine what is visible.
+    flagRequestFilterKeyEvents     — captures KEYCODE_BACK before the system handles it, so our overlay
+                                     onBackPressed() fires reliably on ALL OEMs including Samsung DeX,
+                                     Xiaomi split-screen, and Oppo/Realme gesture navigation.
+    flagReportViewIds              — enables view-id reporting (zero cost; improves window detection
+                                     accuracy on some OEM ROM builds).
+
+  canRequestFilterKeyEvents=true — standalone attribute required alongside the flag on Android 13+
+                                   to reliably capture back-key events through the overlay.
+
+  canRetrieveWindowContent=false — we only need window metadata, not screen text. Privacy-preserving
+                                   and keeps the Play Store accessibility-usage justification honest.
+
+  settingsActivity — required by MIUI 14 and One UI 6 to show a "Settings" link next to the toggle
+                     in Accessibility settings. Without it some OEM ROMs refuse to enable the service.
+
+  notificationTimeout=50ms (was 100ms) — halved so we react faster when a monitored app opens.
+  The minimum is 0 but 50ms filters duplicate events adequately without CPU waste.
 -->
