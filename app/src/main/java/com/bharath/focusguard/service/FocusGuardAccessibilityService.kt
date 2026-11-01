@@ -488,19 +488,10 @@ class FocusGuardAccessibilityService : AccessibilityService() {
             val log = try { db.windowLogDao().get(active.id, day) } catch (_: Exception) { null }
             val breakUntil = log?.breakUntilEpochMs ?: 0L
             if (now >= breakUntil) {
-                if (!overlayManager.isBlocking(pkg)) {
-                    val untilText = android.text.format.DateFormat.getTimeFormat(applicationContext).format(
-                        java.util.Date(windowEndMillis(active, nowDt)))
-                    val total = windowLengthMillis(active); val elapsed = windowElapsedMillis(active, nowDt)
-                    withContext(Dispatchers.Main) {
-                        overlayManager.showBlockWindow(
-                            app = monitored, windowName = active.name.ifBlank { null }, untilText = untilText,
-                            progress = (elapsed.toFloat() / total.coerceAtLeast(1)).coerceIn(0f, 1f),
-                            breaksLeft = if ((log?.breaksUsed ?: 0) >= 1) 0 else 1,
-                            onTakeBreak = { takeWindowBreak(active.id, day) },
-                            onLeaveEarly = { leaveWindowEarly(active.id, day) },
-                        )
-                    }
+                withContext(Dispatchers.Main) {
+                    overlayManager.hideAll()
+                    exitToHome(pkg)
+                    showToast("🔒 " + monitored.displayName + " is blocked by " + (active.name.ifBlank { "Focus Window" }) + ".")
                 }
                 return
             }
@@ -515,21 +506,11 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         // The user cannot use the app for the next 10 minutes even if they have remaining total time.
         val cooldownExpiresAt = cooldownManager.getCooldownExpiresAt(pkg)
         if (cooldownExpiresAt != null && now < cooldownExpiresAt) {
-            if (overlayManager.isBlocking(pkg)) {
-                return
-            }
             withContext(Dispatchers.Main) {
-                overlayManager.showCooldownBlockScreen(
-                    app = monitored,
-                    cooldownExpiresAtMillis = cooldownExpiresAt,
-                    minutesLeft = minutesLeft,
-                    onCooldownFinished = {
-                        cooldownManager.clearCooldown(monitored.packageName)
-                        serviceScope.launch {
-                            handleMonitoredAppEntered(monitored)
-                        }
-                    }
-                )
+                overlayManager.hideAll()
+                exitToHome(pkg)
+                val minsLeft = ceil((cooldownExpiresAt - now) / 60_000.0).toInt().coerceAtLeast(1)
+                showToast("⏸️ " + monitored.displayName + " is on a 10-minute focus break (" + minsLeft + " min left).")
             }
             return
         }
@@ -571,9 +552,10 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         // â”€â”€ 5. Check daily budget from DB â”€â”€
         withContext(Dispatchers.Main) {
             if (minutesLeft <= 0) {
-                // â”€â”€ HARD BLOCK: Daily limit exhausted! â”€â”€
-                val canExtend = (usage?.extendUsedToday == false)
-                overlayManager.showHardBlockScreen(monitored, canExtend = canExtend)
+                // Design change: no hard-block overlay — close app instantly to Home.
+                overlayManager.hideAll()
+                exitToHome(pkg)
+                showToast("🔒 Daily limit reached for " + monitored.displayName + ".")
             } else {
                 // â”€â”€ GATE: Budget remains. Show checklist â†’ duration picker â”€â”€
                 overlayManager.showChecklistThenPicker(monitored, minutesLeft) { pickedMinutes ->
@@ -799,42 +781,23 @@ class FocusGuardAccessibilityService : AccessibilityService() {
             val cooldownExpiresAt = cooldownManager.startCooldown(pkg)
 
             withContext(Dispatchers.Main) {
+                // Design change: Remove blocker overlay completely!
+                // Instantly remove any overlays and force exit to Home.
+                overlayManager.hideAll()
+
                 val inMonitoredApp = isAppInForeground(pkg)
                 if (inMonitoredApp) {
-                    val canExtend = (usage?.extendUsedToday == false)
-                    if (minutesLeft <= 0) {
-                        // BUG-001 fix: Layer 2 â€” forcibly exit to Home before showing overlay
-                        exitToHome(pkg)
-                        overlayManager.showHardBlockScreen(monitored, canExtend = canExtend)
-                    } else {
-                        // BUG-001 fix: Layer 2 â€” forcibly exit to Home before showing cooldown overlay
-                        exitToHome(pkg)
-                        // Dedicated 10-minute Cooldown Block Screen
-                        overlayManager.showCooldownBlockScreen(
-                            app = monitored,
-                            cooldownExpiresAtMillis = cooldownExpiresAt,
-                            minutesLeft = minutesLeft,
-                            onCooldownFinished = {
-                                cooldownManager.clearCooldown(monitored.packageName)
-                                serviceScope.launch {
-                                    handleMonitoredAppEntered(monitored)
-                                }
-                            }
-                        )
-                    }
-                } else {
-                    overlayManager.hideAll()
+                    exitToHome(pkg)
                 }
 
                 if (minutesLeft <= 0) {
-                    showToast("ðŸ”’ Time's up! Daily limit reached for ${monitored.displayName}.")
+                    showToast("🔒 Time's up! Daily limit reached for " + monitored.displayName + ".")
                 } else {
-                    showToast("â¸ï¸ 10-minute focus break active for ${monitored.displayName}.")
+                    showToast("⏸️ 10-minute focus break started for " + monitored.displayName + ".")
                 }
             }
         }
     }
-
     /**
      * Forcibly brings the user to the device's Home screen using multi-tier execution:
      * Tier 1: System Accessibility Global Action Home
@@ -844,6 +807,7 @@ class FocusGuardAccessibilityService : AccessibilityService() {
      */
     private fun exitToHome(pkg: String? = null) {
         markExitingToHome(pkg)
+        overlayManager.hideAll()
 
         // Tier 1: System Accessibility Global Action Home
         performGlobalAction(GLOBAL_ACTION_HOME)
@@ -907,6 +871,7 @@ class FocusGuardAccessibilityService : AccessibilityService() {
     }
 
     // â”€â”€ Phase 3: window break / leave-early / timing helpers â”€â”€
+    @Suppress("unused")
     private fun takeWindowBreak(windowId: Long, day: Long) {
         serviceScope.launch {
             val existing = try { db.windowLogDao().get(windowId, day) } catch (_: Exception) { null }
@@ -916,6 +881,7 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         }
     }
 
+    @Suppress("unused")
     private fun leaveWindowEarly(windowId: Long, day: Long) {
         serviceScope.launch {
             val existing = try { db.windowLogDao().get(windowId, day) } catch (_: Exception) { null }
