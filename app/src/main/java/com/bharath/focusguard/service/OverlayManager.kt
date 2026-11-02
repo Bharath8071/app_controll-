@@ -52,6 +52,23 @@ class OverlayManager(private val context: Context) {
 
     private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private var currentOverlayView: ComposeView? = null
+
+    /**
+     * Every overlay window this manager has successfully attached.
+     * A single reference allowed a failed/skipped removal to permanently leak
+     * a full-screen window (which then survived Home/Back until process death).
+     * Keeping the full set lets every hide clean up leaked windows too.
+     */
+    private val attachedViews = mutableSetOf<ComposeView>()
+
+    /**
+     * Invalidates asynchronous overlay builders (the checklist loads tasks on IO
+     * before attaching its view). Without this, a slow builder could attach a
+     * stale checklist *after* the picker or after everything was hidden, which
+     * looked like "choosing a time sends me back to page 1".
+     */
+    @Volatile private var overlayGeneration = 0
+
     private val mainHandler = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val db = AppDatabase.getInstance(context)
@@ -102,10 +119,11 @@ class OverlayManager(private val context: Context) {
 
     private fun replaceOverlay(content: ComposeView, fullScreenBlocking: Boolean) {
         runOnMain {
-            removeCurrentOverlay()
+            removeAllOverlays()
             currentOverlayView = content
             try {
                 windowManager.addView(content, overlayLayoutParams(fullScreenBlocking))
+                attachedViews.add(content)
             } catch (e: Exception) {
                 android.util.Log.e("FocusGuard", "Failed to add WindowManager overlay", e)
                 currentOverlayView = null
@@ -115,16 +133,29 @@ class OverlayManager(private val context: Context) {
         }
     }
 
-    private fun removeCurrentOverlay() {
-        currentOverlayView?.let { view ->
+    /**
+     * Removes EVERY overlay window this manager has attached, not just the most
+     * recent one. Removal is attempted per view so one failure can never strand
+     * the rest; a view that still cannot be removed stays registered so a later
+     * hide can retry instead of silently losing the only handle to it.
+     */
+    private fun removeAllOverlays() {
+        val views = attachedViews.toMutableSet()
+        currentOverlayView?.let { views.add(it) }
+        for (view in views) {
             try {
                 if (view.isAttachedToWindow) {
                     windowManager.removeViewImmediate(view)
+                } else {
+                    windowManager.removeView(view)
                 }
+                attachedViews.remove(view)
             } catch (e: Exception) {
                 try {
-                    windowManager.removeView(view)
+                    windowManager.removeViewImmediate(view)
+                    attachedViews.remove(view)
                 } catch (e2: Exception) {
+                    // Keep it registered: the next hide will try again.
                 }
             }
         }
@@ -143,9 +174,14 @@ class OverlayManager(private val context: Context) {
     fun showChecklistThenPicker(app: MonitoredApp, minutesLeft: Int, onSessionPicked: (Int) -> Unit) {
         currentState = OverlayState.CHECKLIST
         currentPackage = app.packageName
+        val generation = ++overlayGeneration
         scope.launch {
             // Instant render from local Room cache
             val cachedTasks = withContext(Dispatchers.IO) { db.notionTaskDao().getTopPriorityOnce() }
+
+            // The flow may have advanced (time picker, hideAll, another overlay)
+            // while the task cache was loading. Never attach this stale checklist.
+            if (generation != overlayGeneration) return@launch
 
             val view = context.createOverlayComposeView(onBackPressed = { goHome() }) {
                 MaterialTheme {
@@ -176,6 +212,7 @@ class OverlayManager(private val context: Context) {
                     )
                 }
             }
+            if (generation != overlayGeneration) return@launch
             replaceOverlay(view, fullScreenBlocking = true)
         }
     }
@@ -183,6 +220,7 @@ class OverlayManager(private val context: Context) {
     fun showTimePicker(app: MonitoredApp, minutesLeft: Int, onSessionPicked: (Int) -> Unit) {
         currentState = OverlayState.TIME_PICKER
         currentPackage = app.packageName
+        overlayGeneration++
         val view = context.createOverlayComposeView(onBackPressed = { goHome() }) {
             MaterialTheme {
                 TimePickerScreen(
@@ -215,6 +253,7 @@ class OverlayManager(private val context: Context) {
     ) {
         currentState = OverlayState.SESSION_FINISHED
         currentPackage = app.packageName
+        overlayGeneration++
         val view = context.createOverlayComposeView(onBackPressed = { goHome() }) {
             MaterialTheme {
                 BlockScreen(
@@ -240,6 +279,7 @@ class OverlayManager(private val context: Context) {
     fun showHardBlockScreen(app: MonitoredApp, canExtend: Boolean) {
         currentState = OverlayState.HARD_BLOCK
         currentPackage = app.packageName
+        overlayGeneration++
         val view = context.createOverlayComposeView(onBackPressed = { goHome() }) {
             MaterialTheme {
                 BlockScreen(
@@ -271,6 +311,7 @@ class OverlayManager(private val context: Context) {
     ) {
         currentState = OverlayState.COOLDOWN_BLOCK
         currentPackage = app.packageName
+        overlayGeneration++
         var finishedHandled = false
         val view = context.createOverlayComposeView(onBackPressed = { goHome() }) {
             MaterialTheme {
@@ -303,6 +344,7 @@ class OverlayManager(private val context: Context) {
     ) {
         currentState = OverlayState.BLOCK_WINDOW
         currentPackage = app.packageName
+        overlayGeneration++
         val view = context.createOverlayComposeView(onBackPressed = { goHome() }) {
             MaterialTheme {
                 BlockWindowScreen(
@@ -318,6 +360,7 @@ class OverlayManager(private val context: Context) {
     fun showTamperLock() {
         currentState = OverlayState.TAMPER_LOCK
         currentPackage = null
+        overlayGeneration++
         val view = context.createOverlayComposeView(onBackPressed = { goHome() }) {
             MaterialTheme {
                 TamperLockScreen(
@@ -336,7 +379,8 @@ class OverlayManager(private val context: Context) {
 
     fun hideAll() {
         runOnMain {
-            removeCurrentOverlay()
+            overlayGeneration++      // cancel any async builder still in flight
+            removeAllOverlays()
             currentState = OverlayState.IDLE
             currentPackage = null
         }
@@ -344,6 +388,7 @@ class OverlayManager(private val context: Context) {
 
     fun goHome() {
         runOnMain {
+            overlayGeneration++
             val pkg = currentPackage
             try {
                 onGoHomeAction?.invoke(pkg)
@@ -351,8 +396,8 @@ class OverlayManager(private val context: Context) {
                 android.util.Log.e("FocusGuard", "Failed to invoke onGoHomeAction", e)
             }
 
-            // Immediately remove overlay so all touches, gestures, and keys return to Android OS
-            removeCurrentOverlay()
+            // Immediately remove all overlays so all touches, gestures, and keys return to Android OS
+            removeAllOverlays()
             currentState = OverlayState.IDLE
             currentPackage = null
 

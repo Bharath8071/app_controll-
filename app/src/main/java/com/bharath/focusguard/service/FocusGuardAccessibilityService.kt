@@ -183,9 +183,15 @@ class FocusGuardAccessibilityService : AccessibilityService() {
             android.util.Log.e("FocusGuard", "Failed to start foreground", e)
         }
 
-        overlayManager = OverlayManager(this).also { manager ->
-            manager.onEmergencyExtend = { app -> grantEmergencyExtend(app) }
-            manager.onGoHomeAction = { pkg -> exitToHome(pkg) }
+        if (!::overlayManager.isInitialized) {
+            overlayManager = OverlayManager(this).also { manager ->
+                manager.onEmergencyExtend = { app -> grantEmergencyExtend(app) }
+                manager.onGoHomeAction = { pkg -> exitToHome(pkg) }
+            }
+        } else {
+            // Reconnected without a full service destroy: a window from the
+            // previous connection may still be attached, so clear it first.
+            try { overlayManager.hideAll() } catch (_: Exception) {}
         }
         // BUG-S5 fix: Removed false-positive tamper-lock trigger.
         // TYPE_ACCESSIBILITY_OVERLAY (used in OverlayManager) does NOT require SYSTEM_ALERT_WINDOW;
@@ -951,7 +957,13 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         mainHandler.removeCallbacks(timerRunnable)
         mainHandler.removeCallbacks(launcherRefreshRunnable)
         activeSessionMap.clear()
-        overlayManager.cancelScope() // BUG-019 fix: cancel OverlayManager's coroutine scope
+        // Remove any attached overlay window before the manager dies; otherwise
+        // a full-screen checklist could outlive the service and become
+        // unreachable (the classic "only a reboot dismisses it" bug).
+        if (::overlayManager.isInitialized) {
+            try { overlayManager.hideAll() } catch (_: Exception) {}
+            overlayManager.cancelScope() // BUG-019 fix: cancel OverlayManager's coroutine scope
+        }
         serviceScope.cancel()
         super.onDestroy()
     }
