@@ -62,11 +62,23 @@ class UserPreferences(private val context: Context) {
         }
     }
 
+    /**
+     * Gate mode: true = Overlay Mode (overlay draws on top of the monitored app — current behavior).
+     *            false = Activity Mode (FocusGuard's own GateActivity opens instead of an overlay).
+     * Defaults to true so existing installs keep their current behavior.
+     */
+    val appMode: Flow<Boolean> = context.dataStore.data.map { it[APP_MODE] ?: true }
+
+    suspend fun setAppMode(overlayMode: Boolean) {
+        context.dataStore.edit { prefs -> prefs[APP_MODE] = overlayMode }
+    }
+
     companion object {
         private val TOKEN = stringPreferencesKey("notion_token")
         private val DATABASE_ID = stringPreferencesKey("notion_database_id")
         private val CONTROLLER_ENABLED = booleanPreferencesKey("controller_enabled")
         private val DISABLED_UNTIL_DATE = stringPreferencesKey("disabled_until_date")
         private val ONBOARDING_STEP = intPreferencesKey("onboarding_step")
+        private val APP_MODE = booleanPreferencesKey("app_mode")
     }
 }

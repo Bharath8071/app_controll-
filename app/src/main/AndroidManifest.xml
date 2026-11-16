@@ -123,6 +123,20 @@
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_focusguard_info" />
         </receiver>
         <activity android:name=".widget.BlockNowActivity" android:theme="@style/Theme.FocusGuard" android:exported="false" />
+
+        <!--
+          Activity Mode: opened by FocusGuardAccessibilityService when appMode = false.
+          Transparent theme so it feels like a dialog floating over the home screen.
+          singleTask prevents stacking multiple gate screens if the user opens the
+          monitored app repeatedly before making a selection.
+          excludeFromRecents hides it from the recent-apps tray.
+        -->
+        <activity
+            android:name=".ui.gate.GateActivity"
+            android:theme="@style/Theme.FocusGuard.Transparent"
+            android:launchMode="singleTask"
+            android:exported="false"
+            android:excludeFromRecents="true" />
         <receiver
             android:name=".service.FocusGuardDeviceAdminReceiver"
             android:permission="android.permission.BIND_DEVICE_ADMIN"

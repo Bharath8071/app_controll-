@@ -119,6 +119,8 @@ class MainActivity : ComponentActivity() {
                     usageGranted = PermissionUtils.hasUsageAccess(this@MainActivity),
                     usageTop = viewModel.usageTop,
                     onRequestUsage = { PermissionUtils.requestUsageAccess(this@MainActivity) },
+                    appMode = viewModel.appMode.collectAsState().value,
+                    onSetAppMode = viewModel::setAppMode,
                 )
                 if (showEditor) {
                     WindowEditorDialog(existing = viewModel.windows.collectAsState().value,
@@ -195,6 +197,8 @@ fun MainScreen(
     usageGranted: Boolean = false,
     usageTop: List<Pair<String, Long>> = emptyList(),
     onRequestUsage: () -> Unit = {},
+    appMode: Boolean = true,
+    onSetAppMode: (Boolean) -> Unit = {},
 ) {
     var showPicker by remember { mutableStateOf(false) }
     var showNotion by remember { mutableStateOf(false) }
@@ -276,6 +280,48 @@ fun MainScreen(
             if (currentTab == 2) {
                 BlockWindowsScreen(windows = windows, activeNow = false,
                     onToggle = onToggleWindow, onDelete = onDeleteWindow, onAdd = onAddWindow)
+
+                // ── Gate Mode Toggle ──
+                androidx.compose.material3.Surface(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+                    color = Color(0xFF1E293B),
+                    border = BorderStroke(1.dp, Color(0xFF334155))
+) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(if (appMode) "📱" else "🚪", fontSize = 22.sp)
+                        Spacer(Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "Gate Mode",
+                                color = Color.White,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 14.sp
+                            )
+                            Text(
+                                if (appMode) "Overlay — appears on top of the app"
+                                else         "App — opens FocusGuard screen",
+                                color = Color(0xFF94A3B8),
+                                fontSize = 11.sp
+                            )
+                        }
+                        Switch(
+                            checked = appMode,
+                            onCheckedChange = { onSetAppMode(it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = Color(0xFF6366F1),
+                                uncheckedThumbColor = Color(0xFF94A3B8),
+                                uncheckedTrackColor = Color(0xFF334155),
+                                uncheckedBorderColor = Color(0xFF475569)
+                            )
+                        )
+                    }
+                }
+
                 OutlinedButton(onClick = onOpenPermissions, modifier = Modifier.fillMaxWidth()) { Text("Permissions") }
                 return@Column
             }

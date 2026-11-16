@@ -19,6 +19,7 @@ import com.bharath.focusguard.data.local.entities.MonitoredApp
 import com.bharath.focusguard.data.local.entities.SessionState
 import com.bharath.focusguard.data.prefs.CooldownManager
 import com.bharath.focusguard.data.prefs.UserPreferences
+import com.bharath.focusguard.ui.gate.GateActivity
 import com.bharath.focusguard.util.NotificationHelper
 import com.bharath.focusguard.util.PermissionUtils
 import kotlinx.coroutines.*
@@ -95,6 +96,28 @@ class FocusGuardAccessibilityService : AccessibilityService() {
 
     @Volatile private var wasWindowActive: Boolean = false
     @Volatile private var lastWindowName: String = "Block"
+
+    /**
+     * In-memory mirror of UserPreferences.appMode.
+     * true  = Overlay Mode (default): overlay draws on top of the monitored app.
+     * false = Activity Mode: GateActivity opens instead of an overlay.
+     * Defaults to true so the overlay path runs before the first prefs read completes.
+     */
+    @Volatile private var appModeOverlay: Boolean = true
+
+    /** Receives session-start signals from GateActivity in Activity Mode. */
+    private val sessionStartReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != ACTION_SESSION_START) return
+            val pkg     = intent.getStringExtra(EXTRA_PKG) ?: return
+            val minutes = intent.getIntExtra(EXTRA_MINUTES, 0)
+            if (minutes <= 0) return
+            serviceScope.launch {
+                val monitored = db.monitoredAppDao().getByPackage(pkg) ?: return@launch
+                startSession(monitored, minutes)
+            }
+        }
+    }
 
     private fun markExitingToHome(pkg: String? = null) {
         lastExitToHomeTimeMillis = System.currentTimeMillis()
@@ -209,6 +232,18 @@ class FocusGuardAccessibilityService : AccessibilityService() {
             android.util.Log.e("FocusGuard", "Failed to register screenOffReceiver", e)
         }
 
+        // Register session-start receiver (Activity Mode: GateActivity signals session pick)
+        try {
+            val sessionFilter = IntentFilter(ACTION_SESSION_START)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(sessionStartReceiver, sessionFilter, RECEIVER_NOT_EXPORTED)
+            } else {
+                registerReceiver(sessionStartReceiver, sessionFilter)
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("FocusGuard", "Failed to register sessionStartReceiver", e)
+        }
+
         // Initialize launcher cache; also schedule periodic refresh (Fix-OEM-3)
         refreshLauncherPackages()
         mainHandler.removeCallbacks(launcherRefreshRunnable)
@@ -242,6 +277,17 @@ class FocusGuardAccessibilityService : AccessibilityService() {
                 }
             } catch (e: Exception) {
                 android.util.Log.e("FocusGuard", "Failed to collect controllerEnabled", e)
+            }
+        }
+
+        // Mirror appMode into the fast in-memory flag (O(1) per accessibility event)
+        serviceScope.launch {
+            try {
+                prefs.appMode.collect { overlayMode ->
+                    appModeOverlay = overlayMode
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("FocusGuard", "Failed to collect appMode", e)
             }
         }
 
@@ -563,11 +609,36 @@ class FocusGuardAccessibilityService : AccessibilityService() {
                 exitToHome(pkg)
                 showToast("🔒 Daily limit reached for " + monitored.displayName + ".")
             } else {
-                // â”€â”€ GATE: Budget remains. Show checklist â†’ duration picker â”€â”€
-                overlayManager.showChecklistThenPicker(monitored, minutesLeft) { pickedMinutes ->
-                    startSession(monitored, pickedMinutes)
+                // â”€â”€ GATE: Budget remains. Branch on appMode â”€â”€
+                if (appModeOverlay) {
+                    // Overlay Mode (default): draw checklist + picker on top of the monitored app
+                    overlayManager.showChecklistThenPicker(monitored, minutesLeft) { pickedMinutes ->
+                        startSession(monitored, pickedMinutes)
+                    }
+                } else {
+                    // Activity Mode: open GateActivity; session started via broadcast on pick
+                    launchGateActivity(monitored, minutesLeft)
                 }
             }
+        }
+    }
+
+    /**
+     * Activity Mode helper: fires an Intent to open GateActivity.
+     * GateActivity shows the same checklist + time-picker UI, then signals
+     * the service via ACTION_SESSION_START broadcast when the user picks a duration.
+     */
+    private fun launchGateActivity(app: MonitoredApp, minutesLeft: Int) {
+        try {
+            val intent = Intent(this, GateActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra(EXTRA_PKG, app.packageName)
+                putExtra(EXTRA_MINUTES, minutesLeft)
+                putExtra(EXTRA_APP_NAME, app.displayName)
+            }
+            startActivity(intent)
+        } catch (e: Exception) {
+            android.util.Log.e("FocusGuard", "Failed to launch GateActivity", e)
         }
     }
 
@@ -954,6 +1025,10 @@ class FocusGuardAccessibilityService : AccessibilityService() {
             unregisterReceiver(screenOffReceiver)
         } catch (e: Exception) {
         }
+        try {
+            unregisterReceiver(sessionStartReceiver)
+        } catch (e: Exception) {
+        }
         mainHandler.removeCallbacks(timerRunnable)
         mainHandler.removeCallbacks(launcherRefreshRunnable)
         activeSessionMap.clear()
@@ -966,5 +1041,13 @@ class FocusGuardAccessibilityService : AccessibilityService() {
         }
         serviceScope.cancel()
         super.onDestroy()
+    }
+
+    companion object {
+        /** Broadcast action sent by GateActivity when user picks a session duration. */
+        const val ACTION_SESSION_START = "com.bharath.focusguard.ACTION_SESSION_START"
+        const val EXTRA_PKG            = "pkg"
+        const val EXTRA_MINUTES        = "minutes"
+        const val EXTRA_APP_NAME       = "appName"
     }
 }

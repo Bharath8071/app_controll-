@@ -1,3 +1,14 @@
 <resources>
     <style name="Theme.FocusGuard" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <!--
+      Used by GateActivity (Activity Mode gate screen).
+      Transparent window so the home screen shows through behind the Compose UI.
+    -->
+    <style name="Theme.FocusGuard.Transparent" parent="Theme.FocusGuard">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowAnimationStyle">@android:style/Animation</item>
+    </style>
 </resources>

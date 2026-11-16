@@ -54,6 +54,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         prefs.controllerEnabled.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
 
     /**
+     * Gate mode.
+     * true  = Overlay Mode (default): overlay draws on top of the monitored app.
+     * false = Activity Mode: GateActivity opens instead.
+     */
+    val appMode: StateFlow<Boolean> =
+        prefs.appMode.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+
+    fun setAppMode(overlayMode: Boolean) {
+        viewModelScope.launch { prefs.setAppMode(overlayMode) }
+    }
+
+    /**
      * Toggles the controller on/off.
      * When turning OFF â†’ records today's date so the service auto-re-enables after midnight.
      * When turning ON  â†’ clears the disabled-date immediately.
