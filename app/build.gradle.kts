@@ -36,19 +36,12 @@ android {
         kotlinCompilerExtensionVersion = "1.5.14"
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 
     kotlinOptions {
-        jvmTarget = "11"
-    }
-
-    // Use Java 11 toolchain for AGP 8.5 compatibility
-    java {
-        toolchain {
-            languageVersion.set(JavaLanguageVersion.of(11))
-        }
+        jvmTarget = "17"
     }
 
     buildTypes {
