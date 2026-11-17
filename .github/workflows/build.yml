@@ -34,6 +34,16 @@ jobs:
           set -e -o pipefail
           ./gradlew assembleDebug --stacktrace 2>&1 | tee build_log.txt
 
+      - name: Show Build Log on Failure
+        if: failure()
+        run: |
+          echo "=== BUILD LOG (FAILURE) ==="
+          tail -n 120 build_log.txt
+          echo "### Build Failed - Tail Log" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          tail -n 60 build_log.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
       - name: Upload Build Log
         if: always()
         uses: actions/upload-artifact@v4

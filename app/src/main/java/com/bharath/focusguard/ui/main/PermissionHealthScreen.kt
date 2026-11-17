@@ -103,7 +103,8 @@ private fun PermRowView(name: String, reason: String, on: Boolean, action: () ->
     SketchCard(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         bgColor = if (on) FgColor.GreenSoft else FgColor.Paper,
-        borderColor = if (on) FgColor.Green else FgColor.Flag
+        borderColor = if (on) FgColor.Green else FgColor.Flag,
+        contentPadding = PaddingValues(0.dp)
     ) {
         Row(
             Modifier.fillMaxWidth().padding(12.dp),
@@ -141,7 +142,8 @@ fun PermissionBanner(onFix: () -> Unit) {
     SketchCard(
         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
         bgColor = FgColor.FlagField,
-        borderColor = FgColor.Flag
+        borderColor = FgColor.Flag,
+        contentPadding = PaddingValues(0.dp)
     ) {
         Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("⚠️", fontSize = 16.sp)

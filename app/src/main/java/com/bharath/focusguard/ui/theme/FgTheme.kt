@@ -7,29 +7,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.googlefonts.Font
-import androidx.compose.ui.text.googlefonts.GoogleFont
 import androidx.compose.ui.unit.sp
-import com.bharath.focusguard.R
 
-// ── Google Fonts provider ──────────────────────────────────────────────────
-private val provider = GoogleFont.Provider(
-    providerAuthority = "com.google.android.gms.fonts",
-    providerPackage   = "com.google.android.gms",
-    certificates      = R.array.com_google_android_gms_fonts_certs
-)
+/** Hand-written cursive font for headings and sketchbook titles — works offline on all devices */
+val CaveatFamily: FontFamily = FontFamily.Cursive
 
-/** Caveat — the primary hand-written font used for all headings and labels */
-val CaveatFamily: FontFamily = FontFamily(
-    Font(GoogleFont("Caveat"), provider, FontWeight.Normal),
-    Font(GoogleFont("Caveat"), provider, FontWeight.SemiBold),
-    Font(GoogleFont("Caveat"), provider, FontWeight.Bold),
-)
-
-/** Patrick Hand — body / supporting text */
-val PatrickHandFamily: FontFamily = FontFamily(
-    Font(GoogleFont("Patrick Hand"), provider, FontWeight.Normal),
-)
+/** Casual font for body text */
+val PatrickHandFamily: FontFamily = FontFamily.Default
 
 val SketchTypography = Typography(
     displayLarge  = TextStyle(fontFamily = CaveatFamily, fontWeight = FontWeight.Bold,   fontSize = 36.sp, lineHeight = 44.sp),
