@@ -1,13 +1,21 @@
 package com.bharath.focusguard.ui.main
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.bharath.focusguard.data.local.entities.BlockWindow
 import com.bharath.focusguard.ui.theme.FgColor
+import com.bharath.focusguard.ui.theme.sketchBorder
 
 private val DAY_LABELS = listOf("M", "T", "W", "T", "F", "S", "S")
 
@@ -32,38 +40,123 @@ fun WindowEditorDialog(
             (w.daysMask and mask) != 0 && rangesOverlap(startMin, endMin, w.startMinute, w.endMinute)
         }
     }
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (initial == null) "Add block window" else "Edit block window") },
+        containerColor = FgColor.Paper,
+        title = {
+            Text(
+                if (initial == null) "Add Block Window" else "Edit Block Window",
+                color = FgColor.Ink,
+                fontWeight = FontWeight.Bold
+            )
+        },
         text = {
-            Column {
-                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name (optional)") }, modifier = Modifier.fillMaxWidth())
-                Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Name (optional)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = FgColor.Blue,
+                        unfocusedBorderColor = FgColor.Line,
+                        focusedTextColor = FgColor.Ink,
+                        unfocusedTextColor = FgColor.Ink
+                    )
+                )
+
+                // Day selector — sketch chip row
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
                     DAY_LABELS.forEachIndexed { i, label ->
                         val bit = 1 shl i
-                        FilterChip(selected = mask and bit != 0, onClick = { mask = mask xor bit }, label = { Text(label) })
+                        val selected = mask and bit != 0
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .aspectRatio(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (selected) FgColor.YellowPad else FgColor.BgDot)
+                                .sketchBorder(
+                                    color = if (selected) FgColor.Ink else FgColor.Line,
+                                    strokeWidth = 1.5.dp,
+                                    cornerRadius = 8.dp
+                                )
+                                .clickable { mask = mask xor bit },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                label,
+                                color = FgColor.Ink,
+                                fontSize = 13.sp,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+                            )
+                        }
                     }
                 }
-                Spacer(Modifier.height(8.dp))
-                Text("Start ${startH}:${"%02d".format(startM)}  End ${endH}:${"%02d".format(endM)}")
+
+                Text(
+                    "Start $startH:%02d  End $endH:%02d".format(startM, endM),
+                    color = FgColor.Ink,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium
+                )
+
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(value = startH.toString(), onValueChange = { startH = it.toIntOrNull()?.coerceIn(0, 23) ?: startH },
-                        label = { Text("Start h") }, modifier = Modifier.weight(1f))
-                    OutlinedTextField(value = endH.toString(), onValueChange = { endH = it.toIntOrNull()?.coerceIn(0, 23) ?: endH },
-                        label = { Text("End h") }, modifier = Modifier.weight(1f))
+                    OutlinedTextField(
+                        value = startH.toString(),
+                        onValueChange = { startH = it.toIntOrNull()?.coerceIn(0, 23) ?: startH },
+                        label = { Text("Start h") },
+                        modifier = Modifier.weight(1f),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = FgColor.Blue,
+                            unfocusedBorderColor = FgColor.Line,
+                            focusedTextColor = FgColor.Ink,
+                            unfocusedTextColor = FgColor.Ink
+                        )
+                    )
+                    OutlinedTextField(
+                        value = endH.toString(),
+                        onValueChange = { endH = it.toIntOrNull()?.coerceIn(0, 23) ?: endH },
+                        label = { Text("End h") },
+                        modifier = Modifier.weight(1f),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = FgColor.Blue,
+                            unfocusedBorderColor = FgColor.Line,
+                            focusedTextColor = FgColor.Ink,
+                            unfocusedTextColor = FgColor.Ink
+                        )
+                    )
                 }
-                if (mask == 0) Text("Choose at least one day.", color = FgColor.Flag)
-                if (startMin == endMin) Text("Start and end can't be the same time.", color = FgColor.Flag)
-                if (overlap) Text("This overlaps another window.", color = FgColor.Flag)
+
+                if (mask == 0) Text("Pick at least one day.", color = FgColor.Flag, fontSize = 12.sp)
+                if (startMin == endMin) Text("Start and end can't be the same.", color = FgColor.Flag, fontSize = 12.sp)
+                if (overlap) Text("This overlaps another window.", color = FgColor.Flag, fontSize = 12.sp)
             }
         },
         confirmButton = {
-            Button(onClick = { onSave(BlockWindow(id = initial?.id ?: 0, name = name.ifBlank { "Block" },
-                daysMask = mask, startMinute = startMin, endMinute = endMin)) },
-                enabled = mask != 0 && startMin != endMin) { Text("Save") }
+            Button(
+                onClick = {
+                    onSave(
+                        BlockWindow(
+                            id = initial?.id ?: 0,
+                            name = name.ifBlank { "Block" },
+                            daysMask = mask,
+                            startMinute = startMin,
+                            endMinute = endMin
+                        )
+                    )
+                },
+                enabled = mask != 0 && startMin != endMin && !overlap,
+                colors = ButtonDefaults.buttonColors(containerColor = FgColor.Blue)
+            ) { Text("Save", color = FgColor.Paper) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel", color = FgColor.Slate) }
+        },
     )
 }
 

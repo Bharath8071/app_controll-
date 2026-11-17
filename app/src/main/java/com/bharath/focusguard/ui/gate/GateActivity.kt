@@ -4,13 +4,13 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import com.bharath.focusguard.data.local.AppDatabase
 import com.bharath.focusguard.data.local.entities.NotionTask
 import com.bharath.focusguard.service.FocusGuardAccessibilityService
 import com.bharath.focusguard.ui.overlay.ChecklistScreen
 import com.bharath.focusguard.ui.overlay.TimePickerScreen
+import com.bharath.focusguard.ui.theme.SketchTheme
 import kotlinx.coroutines.*
 
 /**
@@ -34,14 +34,14 @@ class GateActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val pkg        = intent.getStringExtra(FocusGuardAccessibilityService.EXTRA_PKG) ?: run { goHome(); return }
+        val pkg         = intent.getStringExtra(FocusGuardAccessibilityService.EXTRA_PKG) ?: run { goHome(); return }
         val minutesLeft = intent.getIntExtra(FocusGuardAccessibilityService.EXTRA_MINUTES, 0).coerceAtLeast(1)
-        val appName    = intent.getStringExtra(FocusGuardAccessibilityService.EXTRA_APP_NAME) ?: pkg
+        val appName     = intent.getStringExtra(FocusGuardAccessibilityService.EXTRA_APP_NAME) ?: pkg
 
         val db = AppDatabase.getInstance(applicationContext)
 
         setContent {
-            MaterialTheme {
+            SketchTheme {
                 var showPicker by remember { mutableStateOf(false) }
                 var tasks by remember { mutableStateOf<List<NotionTask>>(emptyList()) }
 
@@ -84,10 +84,10 @@ class GateActivity : ComponentActivity() {
                     )
                 } else {
                     TimePickerScreen(
-                        appName    = appName,
+                        appName     = appName,
                         minutesLeft = minutesLeft,
-                        onPicked   = { minutes -> startSessionAndLaunch(pkg, minutes) },
-                        onGoHome   = { goHome() }
+                        onPicked    = { minutes -> startSessionAndLaunch(pkg, minutes) },
+                        onGoHome    = { goHome() }
                     )
                 }
             }
@@ -98,11 +98,7 @@ class GateActivity : ComponentActivity() {
         goHome()
     }
 
-    /**
-     * Signals the service to start a session, then auto-launches the monitored app.
-     */
     private fun startSessionAndLaunch(pkg: String, minutes: Int) {
-        // 1. Broadcast session-start to AccessibilityService
         val broadcast = Intent(FocusGuardAccessibilityService.ACTION_SESSION_START).apply {
             setPackage(packageName)
             putExtra(FocusGuardAccessibilityService.EXTRA_PKG, pkg)
@@ -110,7 +106,6 @@ class GateActivity : ComponentActivity() {
         }
         sendBroadcast(broadcast)
 
-        // 2. Auto-launch the monitored app
         try {
             val launchIntent = packageManager.getLaunchIntentForPackage(pkg)
             if (launchIntent != null) {
@@ -121,14 +116,9 @@ class GateActivity : ComponentActivity() {
             android.util.Log.e("GateActivity", "Failed to launch $pkg", e)
         }
 
-        // 3. Close GateActivity
         finish()
     }
 
-    /**
-     * Dismissed without picking a time → go to home screen.
-     * The monitored app remains blocked (no session was started).
-     */
     private fun goHome() {
         val homeIntent = Intent(Intent.ACTION_MAIN).apply {
             addCategory(Intent.CATEGORY_HOME)

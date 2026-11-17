@@ -12,7 +12,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -27,16 +26,24 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bharath.focusguard.data.local.entities.MonitoredApp
 import com.bharath.focusguard.ui.onboarding.OnboardingActivity
+import com.bharath.focusguard.ui.theme.FgColor
+import com.bharath.focusguard.ui.theme.SketchButton
+import com.bharath.focusguard.ui.theme.SketchCard
+import com.bharath.focusguard.ui.theme.SketchTheme
+import com.bharath.focusguard.ui.theme.TideLine
+import com.bharath.focusguard.ui.theme.dotGridBackground
+import com.bharath.focusguard.ui.theme.sketchBorder
 import com.bharath.focusguard.util.PermissionUtils
 import kotlinx.coroutines.launch
 
@@ -56,7 +63,6 @@ class MainActivity : ComponentActivity() {
             return
         }
 
-        // Request notification permission at start on Android 13+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (!PermissionUtils.hasNotificationPermission(this)) {
                 notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
@@ -64,7 +70,7 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            FocusGuardTheme {
+            SketchTheme {
                 var showPerms by remember { mutableStateOf(false) }
                 var tab by remember { mutableStateOf(0) }
                 var showEditor by remember { mutableStateOf(false) }
@@ -72,73 +78,87 @@ class MainActivity : ComponentActivity() {
                 if (showPerms) {
                     PermissionHealthScreen(onBack = { showPerms = false })
                 } else {
-                val apps by viewModel.monitoredApps.collectAsState()
-                val token by viewModel.notionToken.collectAsState()
-                val databaseId by viewModel.notionDatabaseId.collectAsState()
-                val controllerEnabled by viewModel.controllerEnabled.collectAsState()
+                    val apps by viewModel.monitoredApps.collectAsState()
+                    val token by viewModel.notionToken.collectAsState()
+                    val databaseId by viewModel.notionDatabaseId.collectAsState()
+                    val controllerEnabled by viewModel.controllerEnabled.collectAsState()
 
-                // BUG-016 fix: Load installed apps on IO thread to avoid main-thread jank (50-200ms on 200+ app devices)
-                val installedApps by produceState<List<ApplicationInfo>>(initialValue = emptyList()) {
-                    value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        packageManager.getInstalledApplications(PackageManager.GET_META_DATA)
-                            .filter { (it.flags and ApplicationInfo.FLAG_SYSTEM) == 0 }
-                            .sortedBy { it.loadLabel(packageManager).toString().lowercase() }
-                    }
-                }
-
-                MainScreen(
-                    apps = apps,
-                    installedApps = installedApps,
-                    packageManager = packageManager,
-                    notionToken = token,
-                    notionDatabaseId = databaseId,
-                    controllerEnabled = controllerEnabled,
-                    onSetControllerEnabled = viewModel::setControllerEnabled,
-                    onRequestNotificationPermission = {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                            notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-                        } else {
-                            PermissionUtils.openNotificationSettings(this@MainActivity)
+                    val installedApps by produceState<List<ApplicationInfo>>(initialValue = emptyList()) {
+                        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            packageManager.getInstalledApplications(PackageManager.GET_META_DATA)
+                                .filter { (it.flags and ApplicationInfo.FLAG_SYSTEM) == 0 }
+                                .sortedBy { it.loadLabel(packageManager).toString().lowercase() }
                         }
-                    },
-                    onAddApp = { info, budget -> viewModel.addApp(info, packageManager, budget) },
-                    onUpdateBudget = viewModel::updateBudget,
-                    onRemove = viewModel::removeApp,
-                    onSaveNotion = viewModel::saveNotion,
-                    onOpenPermissions = { showPerms = true },
-                    currentTab = tab,
-                    onTab = { tab = it },
-                    windows = viewModel.windows.collectAsState().value,
-                    streak = viewModel.streakDays.collectAsState().value,
-                    weekly = viewModel.weeklyAppMinutes,
-                    budgetPerDay = apps.sumOf { it.app.dailyBudgetMinutes },
-                    onToggleWindow = { viewModel.saveWindow(it) },
-                    onDeleteWindow = { viewModel.deleteWindow(it) },
-                    onAddWindow = { showEditor = true },
-                    onBlockNow = { showBlockNow = true },
-                    usageGranted = PermissionUtils.hasUsageAccess(this@MainActivity),
-                    usageTop = viewModel.usageTop,
-                    onRequestUsage = { PermissionUtils.requestUsageAccess(this@MainActivity) },
-                    appMode = viewModel.appMode.collectAsState().value,
-                    onSetAppMode = viewModel::setAppMode,
-                )
-                if (showEditor) {
-                    WindowEditorDialog(existing = viewModel.windows.collectAsState().value,
-                        onDismiss = { showEditor = false },
-                        onSave = { viewModel.saveWindow(it) { showEditor = false } })
-                }
-                if (showBlockNow) {
-                    AlertDialog(onDismissRequest = { showBlockNow = false }, title = { Text("Block now") },
-                        text = { Text("Start a focus block immediately.") },
-                        confirmButton = {
-                            Column {
-                                listOf(30, 60, 120).forEach { m ->
-                                    TextButton(onClick = { viewModel.blockNow(m); showBlockNow = false }) { Text("$m min") }
-                                }
+                    }
+
+                    MainScreen(
+                        apps = apps,
+                        installedApps = installedApps,
+                        packageManager = packageManager,
+                        notionToken = token,
+                        notionDatabaseId = databaseId,
+                        controllerEnabled = controllerEnabled,
+                        onSetControllerEnabled = viewModel::setControllerEnabled,
+                        onRequestNotificationPermission = {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                            } else {
+                                PermissionUtils.openNotificationSettings(this@MainActivity)
                             }
                         },
-                        dismissButton = { TextButton(onClick = { showBlockNow = false }) { Text("Cancel") } })
-                }
+                        onAddApp = { info, budget -> viewModel.addApp(info, packageManager, budget) },
+                        onUpdateBudget = viewModel::updateBudget,
+                        onRemove = viewModel::removeApp,
+                        onSaveNotion = viewModel::saveNotion,
+                        onOpenPermissions = { showPerms = true },
+                        currentTab = tab,
+                        onTab = { tab = it },
+                        windows = viewModel.windows.collectAsState().value,
+                        streak = viewModel.streakDays.collectAsState().value,
+                        weekly = viewModel.weeklyAppMinutes,
+                        budgetPerDay = apps.sumOf { it.app.dailyBudgetMinutes },
+                        onToggleWindow = { viewModel.saveWindow(it) },
+                        onDeleteWindow = { viewModel.deleteWindow(it) },
+                        onAddWindow = { showEditor = true },
+                        onBlockNow = { showBlockNow = true },
+                        usageGranted = PermissionUtils.hasUsageAccess(this@MainActivity),
+                        usageTop = viewModel.usageTop,
+                        onRequestUsage = { PermissionUtils.requestUsageAccess(this@MainActivity) },
+                        appMode = viewModel.appMode.collectAsState().value,
+                        onSetAppMode = viewModel::setAppMode,
+                    )
+                    if (showEditor) {
+                        WindowEditorDialog(
+                            existing = viewModel.windows.collectAsState().value,
+                            onDismiss = { showEditor = false },
+                            onSave = { viewModel.saveWindow(it) { showEditor = false } })
+                    }
+                    if (showBlockNow) {
+                        AlertDialog(
+                            onDismissRequest = { showBlockNow = false },
+                            containerColor = FgColor.Paper,
+                            title = {
+                                Text("Block now", fontWeight = FontWeight.Bold, color = FgColor.Ink)
+                            },
+                            text = {
+                                Text("Start a focus block immediately.", color = FgColor.Slate)
+                            },
+                            confirmButton = {
+                                Column {
+                                    listOf(30, 60, 120).forEach { m ->
+                                        TextButton(onClick = { viewModel.blockNow(m); showBlockNow = false }) {
+                                            Text("$m min", color = FgColor.Blue)
+                                        }
+                                    }
+                                }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { showBlockNow = false }) {
+                                    Text("Cancel", color = FgColor.Slate)
+                                }
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -149,25 +169,15 @@ class MainActivity : ComponentActivity() {
         viewModel.refreshStats()
         viewModel.loadUsageCard(application, viewModel.monitoredApps.value.map { it.app.packageName }.toSet())
         com.bharath.focusguard.service.WindowAlarmScheduler.rescheduleAll(this)
-        // Phase 2: re-check on resume; fire permission-lost notification if critical missing.
         if (!PermissionUtils.hasAccessibilityPermission(this) || !PermissionUtils.hasOverlayPermission(this)) {
             com.bharath.focusguard.util.NotificationHelper.showPermissionLost(this)
         }
     }
 }
 
+// Keep alias so any stale reference compiles
 @Composable
-fun FocusGuardTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
-        colorScheme = darkColorScheme(
-            background = Color(0xFF0B0F19),
-            surface = Color(0xFF1E293B),
-            primary = Color(0xFF6366F1),
-            secondary = Color(0xFF10B981)
-        ),
-        content = content
-    )
-}
+fun FocusGuardTheme(content: @Composable () -> Unit) = SketchTheme(content = content)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -185,7 +195,7 @@ fun MainScreen(
     onRemove: (MonitoredApp) -> Unit,
     onSaveNotion: (String, String, () -> Unit) -> Unit,
     onOpenPermissions: () -> Unit = {},
-    currentTab: Int = 0,    onTab: (Int) -> Unit = {},
+    currentTab: Int = 0, onTab: (Int) -> Unit = {},
     windows: List<com.bharath.focusguard.data.local.entities.BlockWindow> = emptyList(),
     streak: Int = 0,
     weekly: List<com.bharath.focusguard.data.local.entities.AppDaily> = emptyList(),
@@ -207,13 +217,51 @@ fun MainScreen(
     val totalBudget = apps.sumOf { it.app.dailyBudgetMinutes }
     val totalUsed = apps.sumOf { it.minutesUsedToday }
 
+    // Sketch tab bar colours
+    val tabColors = listOf(FgColor.YellowPad, FgColor.BlueSoft, FgColor.GreenSoft)
+    val tabLabels = listOf("Home", "Stats", "Settings")
+    val tabEmojis = listOf("🏠", "📊", "⚙️")
+
     Scaffold(
-        containerColor = Color(0xFF0B0F19),
+        containerColor = FgColor.BgDot,
         bottomBar = {
-            NavigationBar {
-                NavigationBarItem(selected = currentTab == 0, onClick = { onTab(0) }, label = { Text("Home") }, icon = { Text("H") })
-                NavigationBarItem(selected = currentTab == 1, onClick = { onTab(1) }, label = { Text("Analytics") }, icon = { Text("A") })
-                NavigationBarItem(selected = currentTab == 2, onClick = { onTab(2) }, label = { Text("Settings") }, icon = { Text("S") })
+            // Hand-drawn sketch tab bar
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(FgColor.Paper)
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .sketchBorder(color = FgColor.Line, strokeWidth = 1.5.dp, cornerRadius = 0.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                tabLabels.forEachIndexed { i, label ->
+                    val selected = currentTab == i
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(4.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (selected) tabColors[i] else Color.Transparent)
+                            .clickable { onTab(i) }
+                            .then(
+                                if (selected) Modifier.sketchBorder(
+                                    color = FgColor.Ink, strokeWidth = 1.8.dp, cornerRadius = 12.dp
+                                ) else Modifier
+                            )
+                            .padding(vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(tabEmojis[i], fontSize = 18.sp)
+                            Text(
+                                label,
+                                color = FgColor.Ink,
+                                fontSize = 11.sp,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+                            )
+                        }
+                    }
+                }
             }
         },
         topBar = {
@@ -226,364 +274,342 @@ fun MainScreen(
                             "FocusGuard",
                             fontWeight = FontWeight.Bold,
                             fontSize = 20.sp,
-                            color = Color.White
+                            color = FgColor.Ink
                         )
                     }
                 },
                 actions = {
-                    // Shield status pill — reflects live controller enabled/disabled state
-                    val pillColor = if (controllerEnabled) Color(0xFF10B981) else Color(0xFFF59E0B)
-                    val pillLabel = if (controllerEnabled) "Shield Active" else "Shield Paused"
-                    val pillEmoji = if (controllerEnabled) "🟢" else "⏸️"
-                    Surface(
-                        shape = CircleShape,
-                        color = pillColor.copy(alpha = 0.15f),
-                        border = BorderStroke(1.dp, pillColor.copy(alpha = 0.4f)),
-                        modifier = Modifier.padding(end = 16.dp)
+                    // Shield status pill — sketch style
+                    val pillBg = if (controllerEnabled) FgColor.GreenSoft else FgColor.YellowPad
+                    val pillText = if (controllerEnabled) "Active" else "Paused"
+                    Box(
+                        modifier = Modifier
+                            .padding(end = 16.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(pillBg)
+                            .sketchBorder(
+                                color = if (controllerEnabled) FgColor.Green else FgColor.Red,
+                                strokeWidth = 1.5.dp, cornerRadius = 50.dp
+                            )
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(8.dp)
-                                    .background(pillColor, CircleShape)
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                pillLabel,
-                                color = if (controllerEnabled) Color(0xFF34D399) else Color(0xFFFBBF24),
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
+                        Text(
+                            pillText,
+                            color = if (controllerEnabled) FgColor.TideInk else FgColor.Red,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF0B0F19))
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = FgColor.Paper)
             )
         }
     ) { padding ->
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
-                .padding(horizontal = 16.dp)
+                .dotGridBackground()
         ) {
-            val context = androidx.compose.ui.platform.LocalContext.current
-            var hasNotificationAccess by remember { mutableStateOf(PermissionUtils.hasNotificationPermission(context)) }
-            PermissionBanner(onFix = onOpenPermissions)
-            if (currentTab == 1) {
-                AnalyticsScreen(weekly = weekly, budgetPerDay = budgetPerDay)
-                return@Column
-            }
-            if (currentTab == 2) {
-                BlockWindowsScreen(windows = windows, activeNow = false,
-                    onToggle = onToggleWindow, onDelete = onDeleteWindow, onAdd = onAddWindow)
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .padding(horizontal = 14.dp)
+            ) {
+                val context = androidx.compose.ui.platform.LocalContext.current
+                var hasNotificationAccess by remember { mutableStateOf(PermissionUtils.hasNotificationPermission(context)) }
+                PermissionBanner(onFix = onOpenPermissions)
 
-                // ── Gate Mode Toggle ──
-                androidx.compose.material3.Surface(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                    shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
-                    color = Color(0xFF1E293B),
-                    border = BorderStroke(1.dp, Color(0xFF334155))
-) {
+                when (currentTab) {
+                    1 -> {
+                        AnalyticsScreen(weekly = weekly, budgetPerDay = budgetPerDay)
+                        return@Column
+                    }
+                    2 -> {
+                        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            item {
+                                BlockWindowsScreen(
+                                    windows = windows, activeNow = false,
+                                    onToggle = onToggleWindow, onDelete = onDeleteWindow, onAdd = onAddWindow
+                                )
+                            }
+                            item {
+                                // ── Gate Mode Toggle ──
+                                SketchCard(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    bgColor = if (appMode) FgColor.BlueSoft else FgColor.GreenSoft
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(14.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(if (appMode) "📱" else "🚪", fontSize = 22.sp)
+                                        Spacer(Modifier.width(12.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                "Gate Mode",
+                                                color = FgColor.Ink,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 15.sp
+                                            )
+                                            Text(
+                                                if (appMode) "Overlay — appears on top of the app"
+                                                else "App — opens FocusGuard screen",
+                                                color = FgColor.Slate,
+                                                fontSize = 12.sp
+                                            )
+                                        }
+                                        Switch(
+                                            checked = appMode,
+                                            onCheckedChange = { onSetAppMode(it) },
+                                            colors = SwitchDefaults.colors(
+                                                checkedThumbColor = FgColor.Paper,
+                                                checkedTrackColor = FgColor.Blue,
+                                                uncheckedThumbColor = FgColor.Slate,
+                                                uncheckedTrackColor = FgColor.Line,
+                                                uncheckedBorderColor = FgColor.Slate
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                            item {
+                                SketchButton(
+                                    onClick = onOpenPermissions,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    fillColor = FgColor.Paper,
+                                    textColor = FgColor.Ink
+                                ) {
+                                    Text("🔑  Permissions", color = FgColor.Ink, fontWeight = FontWeight.SemiBold)
+                                }
+                            }
+                        }
+                        return@Column
+                    }
+                }
+
+                // ── Tab 0: Home ──
+                HomeCards(
+                    minutesLeft = (budgetPerDay - apps.sumOf { it.minutesUsedToday }).coerceAtLeast(0),
+                    budgetTotal = budgetPerDay, windows = windows, streak = streak,
+                    onBlockNow = onBlockNow, onOpenAnalytics = { onTab(1) },
+                    usageGranted = usageGranted, usageTop = usageTop, onRequestUsage = onRequestUsage
+                )
+
+                Spacer(Modifier.height(8.dp))
+
+                // Notification banner (sketch amber card)
+                if (!hasNotificationAccess) {
+                    SketchCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        bgColor = FgColor.YellowPad
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("🔔", fontSize = 18.sp)
+                            Spacer(Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "Session Alerts Off",
+                                    color = FgColor.Ink,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                )
+                                Text(
+                                    "Enable to get 1-min warnings.",
+                                    color = FgColor.Slate,
+                                    fontSize = 11.sp
+                                )
+                            }
+                            TextButton(onClick = {
+                                onRequestNotificationPermission()
+                                hasNotificationAccess = PermissionUtils.hasNotificationPermission(context)
+                            }) {
+                                Text("Enable", color = FgColor.Blue, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                }
+
+                // Usage overview sketch card (yellow sticky)
+                SketchCard(
+                    modifier = Modifier.fillMaxWidth().rotate(-0.5f),
+                    bgColor = FgColor.YellowPad
+                ) {
+                    Column(Modifier.padding(14.dp)) {
+                        Text(
+                            "TODAY'S USAGE",
+                            color = FgColor.Slate,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.5.sp
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.Bottom
+                        ) {
+                            Column {
+                                Text(
+                                    "${totalUsed}m used",
+                                    color = FgColor.Ink,
+                                    fontSize = 22.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text("of ${totalBudget}m budget", color = FgColor.Slate, fontSize = 12.sp)
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(FgColor.BlueSoft)
+                                    .sketchBorder(FgColor.Blue, strokeWidth = 1.5.dp, cornerRadius = 8.dp)
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    "${apps.size} gated",
+                                    color = FgColor.Blue,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        val progress = if (totalBudget > 0) (totalUsed.toFloat() / totalBudget).coerceIn(0f, 1f) else 0f
+                        TideLine(
+                            progress = progress,
+                            color = when {
+                                progress >= 1f -> FgColor.Red
+                                progress >= 0.7f -> Color(0xFFF59E0B)
+                                else -> FgColor.Green
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            height = 10.dp
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(10.dp))
+
+                // App Controller master toggle — sketch card
+                SketchCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    bgColor = if (controllerEnabled) FgColor.GreenSoft else FgColor.YellowPad
+                ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                        modifier = Modifier.fillMaxWidth().padding(14.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(if (appMode) "📱" else "🚪", fontSize = 22.sp)
+                        Text(if (controllerEnabled) "🛡️" else "⏸️", fontSize = 22.sp)
                         Spacer(Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                "Gate Mode",
-                                color = Color.White,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 14.sp
+                                "App Controller",
+                                color = FgColor.Ink,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp
                             )
                             Text(
-                                if (appMode) "Overlay — appears on top of the app"
-                                else         "App — opens FocusGuard screen",
-                                color = Color(0xFF94A3B8),
-                                fontSize = 11.sp
+                                if (controllerEnabled) "Blocking active"
+                                else "Paused — resumes at midnight",
+                                color = if (controllerEnabled) FgColor.TideInk else FgColor.Red,
+                                fontSize = 12.sp
                             )
                         }
                         Switch(
-                            checked = appMode,
-                            onCheckedChange = { onSetAppMode(it) },
+                            checked = controllerEnabled,
+                            onCheckedChange = { onSetControllerEnabled(it) },
                             colors = SwitchDefaults.colors(
-                                checkedThumbColor = Color.White,
-                                checkedTrackColor = Color(0xFF6366F1),
-                                uncheckedThumbColor = Color(0xFF94A3B8),
-                                uncheckedTrackColor = Color(0xFF334155),
-                                uncheckedBorderColor = Color(0xFF475569)
+                                checkedThumbColor = FgColor.Paper,
+                                checkedTrackColor = FgColor.Green,
+                                uncheckedThumbColor = FgColor.Slate,
+                                uncheckedTrackColor = FgColor.Line,
+                                uncheckedBorderColor = FgColor.Slate
                             )
                         )
                     }
                 }
 
-                OutlinedButton(onClick = onOpenPermissions, modifier = Modifier.fillMaxWidth()) { Text("Permissions") }
-                return@Column
-            }
-            HomeCards(minutesLeft = (budgetPerDay - apps.sumOf { it.minutesUsedToday }).coerceAtLeast(0),
-                budgetTotal = budgetPerDay, windows = windows, streak = streak,
-                onBlockNow = onBlockNow, onOpenAnalytics = { onTab(1) },
-                usageGranted = usageGranted, usageTop = usageTop, onRequestUsage = onRequestUsage)
+                Spacer(Modifier.height(10.dp))
 
-            // Notification Access Banner (if notifications are disabled)
-            if (!hasNotificationAccess) {
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 8.dp),
-                    shape = RoundedCornerShape(14.dp),
-                    color = Color(0xFFF59E0B).copy(alpha = 0.12f),
-                    border = BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.35f))
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("🔔", fontSize = 18.sp)
-                        Spacer(Modifier.width(10.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                "Session Alerts Disabled",
-                                color = Color(0xFFFBBF24),
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp
-                            )
-                            Text(
-                                "Enable notifications to receive 1-min warnings and emergency countdowns.",
-                                color = Color(0xFFFDE68A),
-                                fontSize = 11.sp
-                            )
-                        }
-                        TextButton(
-                            onClick = {
-                                onRequestNotificationPermission()
-                                hasNotificationAccess = PermissionUtils.hasNotificationPermission(context)
-                            }
-                        ) {
-                            Text("Enable", color = Color(0xFFFBBF24), fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-            }
-
-            // Summary Dashboard Card
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 8.dp),
-                shape = RoundedCornerShape(20.dp),
-                color = Color(0xFF1E293B),
-                border = BorderStroke(1.dp, Color(0xFF334155))
-            ) {
-                Column(Modifier.padding(18.dp)) {
-                    Text(
-                        "TODAY'S USAGE OVERVIEW",
-                        color = Color(0xFF94A3B8),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.Bottom
-                    ) {
-                        Column {
-                            Text(
-                                "${totalUsed}m used",
-                                color = Color.White,
-                                fontSize = 24.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                "of ${totalBudget}m total budget",
-                                color = Color(0xFF64748B),
-                                fontSize = 13.sp
-                            )
-                        }
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = Color(0xFF6366F1).copy(alpha = 0.15f)
-                        ) {
-                            Text(
-                                "${apps.size} gated apps",
-                                color = Color(0xFFA5B4FC),
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(14.dp))
-                    val progress = if (totalBudget > 0) (totalUsed.toFloat() / totalBudget).coerceIn(0f, 1f) else 0f
-                    LinearProgressIndicator(
-                        progress = { progress },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(8.dp)
-                            .clip(RoundedCornerShape(4.dp)),
-                        color = when {
-                            progress >= 1f -> Color(0xFFF43F5E)
-                            progress >= 0.7f -> Color(0xFFF59E0B)
-                            else -> Color(0xFF10B981)
-                        },
-                        trackColor = Color(0xFF0F172A)
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(10.dp))
-
-            // ── App Controller Master Toggle ──────────────────────────────────────
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                color = if (controllerEnabled) Color(0xFF1E293B) else Color(0xFF1C1410),
-                border = BorderStroke(
-                    1.dp,
-                    if (controllerEnabled) Color(0xFF10B981).copy(alpha = 0.35f) else Color(0xFFF59E0B).copy(alpha = 0.35f)
+                Text(
+                    "Monitored Apps",
+                    color = FgColor.Ink,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold
                 )
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        if (controllerEnabled) "🛡️" else "⏸️",
-                        fontSize = 22.sp
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
+
+                Spacer(Modifier.height(6.dp))
+
+                if (apps.isEmpty()) {
+                    Box(
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Text(
-                            "App Controller",
-                            color = Color.White,
-                            fontWeight = FontWeight.SemiBold,
+                            "No apps yet.\nTap below to add one.",
+                            color = FgColor.Slate,
+                            textAlign = TextAlign.Center,
                             fontSize = 14.sp
                         )
-                        Text(
-                            if (controllerEnabled)
-                                "Blocking active — apps are being gated"
-                            else
-                                "Paused until midnight — auto-resumes at 12:00 AM",
-                            color = if (controllerEnabled) Color(0xFF34D399) else Color(0xFFFBBF24),
-                            fontSize = 11.sp
-                        )
                     }
-                    Switch(
-                        checked = controllerEnabled,
-                        onCheckedChange = { onSetControllerEnabled(it) },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = Color(0xFF10B981),
-                            uncheckedThumbColor = Color(0xFF94A3B8),
-                            uncheckedTrackColor = Color(0xFF334155),
-                            uncheckedBorderColor = Color(0xFF475569)
-                        )
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(10.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "Monitored Applications",
-                    color = Color(0xFFE2E8F0),
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-
-            Spacer(Modifier.height(8.dp))
-
-            if (apps.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        "No apps monitored yet.\nTap below to add an app.",
-                        color = Color(0xFF64748B),
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    items(apps, key = { it.app.packageName }) { row ->
-                        MonitoredAppCard(
-                            row = row,
-                            packageManager = packageManager,
-                            onEditBudget = { editingApp = row.app },
-                            onRemove = { onRemove(row.app) }
-                        )
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(12.dp))
-
-            // Action Buttons
-            Button(
-                onClick = { showPicker = true },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(50.dp),
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF6366F1),
-                    contentColor = Color.White
-                )
-            ) {
-                Text("+ Add App to Gate", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-            }
-
-            Spacer(Modifier.height(8.dp))
-
-            OutlinedButton(
-                onClick = { showNotion = true },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(46.dp),
-                shape = RoundedCornerShape(14.dp),
-                border = BorderStroke(1.dp, Color(0xFF334155)),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF94A3B8))
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(8.dp)
-                            .background(
-                                if (notionToken.isNotBlank()) Color(0xFF10B981) else Color(0xFF64748B),
-                                CircleShape
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(apps, key = { it.app.packageName }) { row ->
+                            MonitoredAppCard(
+                                row = row,
+                                packageManager = packageManager,
+                                onEditBudget = { editingApp = row.app },
+                                onRemove = { onRemove(row.app) }
                             )
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        if (notionToken.isBlank()) "Connect Notion Database" else "Notion Connected ✓",
-                        fontWeight = FontWeight.Medium,
-                        fontSize = 14.sp
-                    )
+                        }
+                    }
                 }
-            }
 
-            Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(10.dp))
+
+                SketchButton(
+                    onClick = { showPicker = true },
+                    modifier = Modifier.fillMaxWidth().height(50.dp),
+                    fillColor = FgColor.YellowPad, hatched = true, hatchColor1 = FgColor.YellowPad, hatchColor2 = FgColor.Yellow
+                ) {
+                    Text("+ Add App to Gate", color = FgColor.Ink, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                }
+
+                Spacer(Modifier.height(8.dp))
+
+                SketchButton(
+                    onClick = { showNotion = true },
+                    modifier = Modifier.fillMaxWidth().height(46.dp),
+                    fillColor = FgColor.Paper, textColor = FgColor.Ink
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .background(
+                                    if (notionToken.isNotBlank()) FgColor.Green else FgColor.Slate,
+                                    CircleShape
+                                )
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            if (notionToken.isBlank()) "Connect Notion" else "Notion Connected ✓",
+                            color = FgColor.Ink,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+            }
         }
     }
 
@@ -645,34 +671,29 @@ fun MonitoredAppCard(
 
     val isExhausted = row.minutesLeft <= 0
 
-    Surface(
+    SketchCard(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        color = Color(0xFF1E293B),
-        border = BorderStroke(1.dp, Color(0xFF334155))
+        bgColor = if (isExhausted) FgColor.FlagField else FgColor.Paper
     ) {
         Column(Modifier.padding(14.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 // App Icon
                 if (iconBitmap != null) {
                     Image(
                         bitmap = iconBitmap.asImageBitmap(),
                         contentDescription = row.app.displayName,
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clip(RoundedCornerShape(10.dp))
+                        modifier = Modifier.size(44.dp).clip(RoundedCornerShape(10.dp))
                     )
                 } else {
                     Box(
                         modifier = Modifier
                             .size(44.dp)
-                            .background(Color(0xFF334155), RoundedCornerShape(10.dp)),
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(FgColor.BlueSoft)
+                            .sketchBorder(FgColor.Blue, strokeWidth = 1.5.dp, cornerRadius = 10.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(row.app.displayName.take(1), color = Color.White, fontWeight = FontWeight.Bold)
+                        Text(row.app.displayName.take(1), color = FgColor.Blue, fontWeight = FontWeight.Bold)
                     }
                 }
 
@@ -681,69 +702,58 @@ fun MonitoredAppCard(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         row.app.displayName,
-                        color = Color.White,
-                        fontWeight = FontWeight.SemiBold,
+                        color = FgColor.Ink,
+                        fontWeight = FontWeight.Bold,
                         fontSize = 15.sp
                     )
                     Text(
-                        "${row.minutesUsedToday}m / ${row.app.dailyBudgetMinutes}m used",
-                        color = Color(0xFF94A3B8),
+                        "${row.minutesUsedToday}m / ${row.app.dailyBudgetMinutes}m",
+                        color = FgColor.Slate,
                         fontSize = 12.sp
                     )
                 }
 
                 // Status pill
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = if (isExhausted) Color(0xFFF43F5E).copy(alpha = 0.15f) else Color(0xFF10B981).copy(alpha = 0.15f),
-                    border = BorderStroke(
-                        1.dp,
-                        if (isExhausted) Color(0xFFF43F5E).copy(alpha = 0.4f) else Color(0xFF10B981).copy(alpha = 0.4f)
-                    )
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (isExhausted) FgColor.FlagField else FgColor.GreenSoft)
+                        .sketchBorder(
+                            if (isExhausted) FgColor.Red else FgColor.Green,
+                            strokeWidth = 1.5.dp, cornerRadius = 8.dp
+                        )
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
                     Text(
                         text = if (isExhausted) "🔒 Locked" else "${row.minutesLeft}m left",
-                        color = if (isExhausted) Color(0xFFFB7185) else Color(0xFF34D399),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        color = if (isExhausted) FgColor.Red else FgColor.TideInk,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
                     )
                 }
             }
 
-            Spacer(Modifier.height(12.dp))
-
-            LinearProgressIndicator(
-                progress = { progress },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(6.dp)
-                    .clip(RoundedCornerShape(3.dp)),
-                color = when {
-                    progress >= 1f -> Color(0xFFF43F5E)
-                    progress >= 0.7f -> Color(0xFFF59E0B)
-                    else -> Color(0xFF10B981)
-                },
-                trackColor = Color(0xFF0F172A)
-            )
-
             Spacer(Modifier.height(10.dp))
 
-            Row(
+            TideLine(
+                progress = progress,
+                color = when {
+                    progress >= 1f -> FgColor.Red
+                    progress >= 0.7f -> Color(0xFFF59E0B)
+                    else -> FgColor.Green
+                },
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End
-            ) {
-                TextButton(
-                    onClick = onEditBudget,
-                    colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFFA5B4FC))
-                ) {
-                    Text("Edit Budget", fontSize = 13.sp)
+                height = 8.dp
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = onEditBudget) {
+                    Text("Edit Budget", color = FgColor.Blue, fontSize = 13.sp)
                 }
-                TextButton(
-                    onClick = onRemove,
-                    colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFFF43F5E).copy(alpha = 0.8f))
-                ) {
-                    Text("Remove", fontSize = 13.sp)
+                TextButton(onClick = onRemove) {
+                    Text("Remove", color = FgColor.Red, fontSize = 13.sp)
                 }
             }
         }
@@ -758,62 +768,66 @@ fun EditBudgetDialog(
 ) {
     var text by remember { mutableStateOf(app.dailyBudgetMinutes.toString()) }
     val presets = listOf(30, 45, 60, 90, 120)
-    // BUG-011 fix: parse eagerly so Save button can be disabled for invalid/empty input
     val parsedMinutes = text.toIntOrNull()
     val isValid = parsedMinutes != null && parsedMinutes >= 1
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = Color(0xFF1E293B),
+        containerColor = FgColor.Paper,
         title = {
-            Text("Daily Limit for ${app.displayName}", color = Color.White, fontWeight = FontWeight.Bold)
+            Text("Daily Limit — ${app.displayName}", color = FgColor.Ink, fontWeight = FontWeight.Bold)
         },
         text = {
             Column {
                 Text(
-                    "Select a daily budget or enter a custom amount in minutes:",
-                    color = Color(0xFF94A3B8),
+                    "Pick a preset or enter minutes:",
+                    color = FgColor.Slate,
                     fontSize = 13.sp
                 )
-                Spacer(Modifier.height(12.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
+                Spacer(Modifier.height(10.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     presets.take(4).forEach { preset ->
-                        Surface(
+                        Box(
                             modifier = Modifier
                                 .weight(1f)
-                                .clickable { text = preset.toString() },
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (text == preset.toString()) Color(0xFF6366F1) else Color(0xFF0F172A),
-                            border = BorderStroke(1.dp, Color(0xFF334155))
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (text == preset.toString()) FgColor.YellowPad else FgColor.BgDot)
+                                .sketchBorder(
+                                    if (text == preset.toString()) FgColor.Ink else FgColor.Line,
+                                    strokeWidth = 1.5.dp, cornerRadius = 8.dp
+                                )
+                                .clickable { text = preset.toString() }
+                                .padding(vertical = 8.dp),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Box(modifier = Modifier.padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
-                                Text("${preset}m", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                            }
+                            Text(
+                                "${preset}m",
+                                color = FgColor.Ink,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
                 }
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(12.dp))
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it.filter(Char::isDigit).take(3) },
                     label = { Text("Budget (minutes)") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    isError = !isValid && text.isNotEmpty(), // show error only if user has typed something invalid
+                    isError = !isValid && text.isNotEmpty(),
                     supportingText = {
                         if (!isValid && text.isNotEmpty()) {
-                            Text("Minimum 1 minute", color = Color(0xFFFB7185), fontSize = 11.sp)
+                            Text("Minimum 1 minute", color = FgColor.Red, fontSize = 11.sp)
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Color(0xFF6366F1),
-                        unfocusedBorderColor = Color(0xFF334155),
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        errorBorderColor = Color(0xFFF43F5E)
+                        focusedBorderColor = FgColor.Blue,
+                        unfocusedBorderColor = FgColor.Line,
+                        focusedTextColor = FgColor.Ink,
+                        unfocusedTextColor = FgColor.Ink,
+                        errorBorderColor = FgColor.Red
                     )
                 )
             }
@@ -821,17 +835,17 @@ fun EditBudgetDialog(
         confirmButton = {
             Button(
                 onClick = { if (isValid) onSave(parsedMinutes!!) },
-                enabled = isValid, // BUG-011 fix: disable when input is empty or invalid
+                enabled = isValid,
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF6366F1),
-                    disabledContainerColor = Color(0xFF1E293B)
+                    containerColor = FgColor.Blue,
+                    disabledContainerColor = FgColor.Line
                 )
             ) {
-                Text("Save Limit")
+                Text("Save Limit", color = FgColor.Paper)
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel", color = Color(0xFF94A3B8)) }
+            TextButton(onClick = onDismiss) { Text("Cancel", color = FgColor.Slate) }
         }
     )
 }
@@ -854,21 +868,21 @@ private fun AppPickerDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = Color(0xFF1E293B),
-        title = { Text("Select App to Gate", color = Color.White, fontWeight = FontWeight.Bold) },
+        containerColor = FgColor.Paper,
+        title = { Text("Select App to Gate", color = FgColor.Ink, fontWeight = FontWeight.Bold) },
         text = {
             Column {
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
-                    label = { Text("Search installed apps") },
+                    label = { Text("Search apps") },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Color(0xFF6366F1),
-                        unfocusedBorderColor = Color(0xFF334155),
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White
+                        focusedBorderColor = FgColor.Blue,
+                        unfocusedBorderColor = FgColor.Line,
+                        focusedTextColor = FgColor.Ink,
+                        unfocusedTextColor = FgColor.Ink
                     )
                 )
                 Spacer(Modifier.height(10.dp))
@@ -882,13 +896,13 @@ private fun AppPickerDialog(
                                 null
                             }
                         }
-                        Surface(
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { onPick(info, 60) },
-                            shape = RoundedCornerShape(10.dp),
-                            color = Color(0xFF0F172A),
-                            border = BorderStroke(1.dp, Color(0xFF334155))
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(FgColor.BgDot)
+                                .sketchBorder(FgColor.Line, strokeWidth = 1.5.dp, cornerRadius = 10.dp)
+                                .clickable { onPick(info, 60) }
                         ) {
                             Row(
                                 modifier = Modifier.padding(10.dp),
@@ -898,15 +912,13 @@ private fun AppPickerDialog(
                                     Image(
                                         bitmap = iconBitmap.asImageBitmap(),
                                         contentDescription = null,
-                                        modifier = Modifier
-                                            .size(36.dp)
-                                            .clip(RoundedCornerShape(8.dp))
+                                        modifier = Modifier.size(36.dp).clip(RoundedCornerShape(8.dp))
                                     )
                                     Spacer(Modifier.width(10.dp))
                                 }
                                 Text(
                                     info.loadLabel(packageManager).toString(),
-                                    color = Color.White,
+                                    color = FgColor.Ink,
                                     fontWeight = FontWeight.Medium,
                                     fontSize = 14.sp
                                 )
@@ -917,7 +929,7 @@ private fun AppPickerDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Close", color = Color(0xFF94A3B8)) }
+            TextButton(onClick = onDismiss) { Text("Close", color = FgColor.Slate) }
         }
     )
 }
@@ -935,18 +947,19 @@ private fun NotionSettingsDialog(
     var testing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val testContext = androidx.compose.ui.platform.LocalContext.current
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = Color(0xFF1E293B),
-        title = { Text("Notion Checklist Setup", color = Color.White, fontWeight = FontWeight.Bold) },
+        containerColor = FgColor.Paper,
+        title = { Text("Notion Checklist", color = FgColor.Ink, fontWeight = FontWeight.Bold) },
         text = {
             Column {
                 Text(
-                    "Connect your Notion tasks database to show your daily priorities before opening distracting apps.",
-                    color = Color(0xFF94A3B8),
+                    "Connect your Notion tasks database to show priorities before opening distracting apps.",
+                    color = FgColor.Slate,
                     fontSize = 13.sp
                 )
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(12.dp))
                 OutlinedTextField(
                     value = token,
                     onValueChange = { token = it },
@@ -955,28 +968,27 @@ private fun NotionSettingsDialog(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Color(0xFF6366F1),
-                        unfocusedBorderColor = Color(0xFF334155),
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White
+                        focusedBorderColor = FgColor.Blue,
+                        unfocusedBorderColor = FgColor.Line,
+                        focusedTextColor = FgColor.Ink,
+                        unfocusedTextColor = FgColor.Ink
                     )
                 )
                 Spacer(Modifier.height(10.dp))
                 OutlinedTextField(
                     value = databaseId,
                     onValueChange = { databaseId = it },
-                    label = { Text("Database ID (32 characters)") },
+                    label = { Text("Database ID (32 chars)") },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Color(0xFF6366F1),
-                        unfocusedBorderColor = Color(0xFF334155),
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White
+                        focusedBorderColor = FgColor.Blue,
+                        unfocusedBorderColor = FgColor.Line,
+                        focusedTextColor = FgColor.Ink,
+                        unfocusedTextColor = FgColor.Ink
                     )
                 )
                 Spacer(Modifier.height(10.dp))
-                // Phase 10: Test connection
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     OutlinedButton(
                         onClick = {
@@ -994,12 +1006,13 @@ private fun NotionSettingsDialog(
                                 }
                             }
                         },
-                        enabled = token.isNotBlank() && databaseId.isNotBlank() && !testing
+                        enabled = token.isNotBlank() && databaseId.isNotBlank() && !testing,
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = FgColor.Blue)
                     ) { Text(if (testing) "Testing…" else "Test connection") }
                     Spacer(Modifier.width(8.dp))
                     when (testResult) {
-                        true -> Text("Connected", color = Color(0xFF34D399), fontSize = 13.sp)
-                        false -> Text("Couldn't connect. Check your token and database ID.", color = Color(0xFFFB7185), fontSize = 13.sp)
+                        true -> Text("Connected ✓", color = FgColor.Green, fontSize = 13.sp)
+                        false -> Text("Failed. Check token & DB ID.", color = FgColor.Red, fontSize = 12.sp)
                         null -> {}
                     }
                 }
@@ -1008,20 +1021,19 @@ private fun NotionSettingsDialog(
         confirmButton = {
             Button(
                 onClick = { onSave(token, databaseId) },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6366F1))
+                colors = ButtonDefaults.buttonColors(containerColor = FgColor.Blue)
             ) {
-                Text("Save & Sync")
+                Text("Save & Sync", color = FgColor.Paper)
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel", color = Color(0xFF94A3B8)) }
+            TextButton(onClick = onDismiss) { Text("Cancel", color = FgColor.Slate) }
         }
     )
 }
 
 private fun drawableToBitmap(drawable: Drawable): Bitmap {
     // BUG-017 fix: Cap icon dimensions at 96px to prevent loading 22MB+ of adaptive icon bitmaps.
-    // Some adaptive icons declare intrinsic sizes of 432x432px or larger.
     val maxSize = 96
     val rawWidth = if (drawable.intrinsicWidth > 0) drawable.intrinsicWidth else maxSize
     val rawHeight = if (drawable.intrinsicHeight > 0) drawable.intrinsicHeight else maxSize

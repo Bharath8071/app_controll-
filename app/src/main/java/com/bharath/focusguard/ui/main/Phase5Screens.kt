@@ -1,7 +1,7 @@
-﻿package com.bharath.focusguard.ui.main
+package com.bharath.focusguard.ui.main
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -10,14 +10,24 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.bharath.focusguard.data.local.entities.BlockWindow
-import com.bharath.focusguard.ui.theme.FgColor
+import com.bharath.focusguard.ui.theme.*
 import com.bharath.focusguard.util.WindowLogic
 import java.time.LocalDate
 import java.time.LocalDateTime
+
+// ══════════════════════════════════════════════════════════════════
+//  HOME CARDS — today, next block, streak, usage
+// ══════════════════════════════════════════════════════════════════
 
 @Composable
 fun HomeCards(
@@ -31,109 +41,304 @@ fun HomeCards(
     usageTop: List<Pair<String, Long>> = emptyList(),
     onRequestUsage: () -> Unit = {},
 ) {
-    // Today card
-    Surface(shape = RoundedCornerShape(14.dp), color = FgColor.Paper, border = BorderStroke(1.dp, FgColor.Line), modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp)) {
-            Text("Today", style = MaterialTheme.typography.titleLarge, color = FgColor.Ink)
-            Text(if (minutesLeft <= 0) "0 min left. Your budget resets at midnight." else "$minutesLeft min left",
-                style = MaterialTheme.typography.displayLarge, color = FgColor.Ink)
-            LinearProgressIndicator(progress = { if (budgetTotal > 0) 1f - minutesLeft.toFloat() / budgetTotal else 0f },
-                modifier = Modifier.fillMaxWidth(), color = FgColor.Tide, trackColor = FgColor.Line)
-            Spacer(Modifier.height(8.dp))
-            OutlinedButton(onClick = onBlockNow) { Text("Block now") }
+    // ── Today Card (yellow sticky note, rotated slightly) ──────────
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .rotate(-0.7f)
+            .background(FgColor.YellowPad, RoundedCornerShape(8.dp))
+            .sketchBorder(FgColor.Ink, strokeWidth = 2.dp, cornerRadius = 8.dp)
+            .padding(16.dp),
+    ) {
+        // Washi tape
+        Box(modifier = Modifier.align(Alignment.TopCenter).offset(y = (-14).dp)) {
+            WashiTape(width = 70.dp, height = 18.dp)
         }
-    }
-    Spacer(Modifier.height(12.dp))
-    // Next block card
-    val next = remember(windows) { WindowLogic.nextWindowStart(LocalDateTime.now(), windows) }
-    val active = remember(windows) { WindowLogic.activeWindow(LocalDateTime.now(), windows) }
-    Surface(shape = RoundedCornerShape(14.dp), color = FgColor.Paper, border = BorderStroke(1.dp, FgColor.Line), modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp)) {
-            Text("Next block", style = MaterialTheme.typography.titleLarge, color = FgColor.Ink)
-            when {
-                active != null -> Text("Block on until end.", color = FgColor.Ink)
-                next != null -> Text(next.toString(), color = FgColor.Ink)
-                else -> Text("No block windows yet. Add one to close your apps during work hours.", color = FgColor.Slate)
+        Column(modifier = Modifier.rotate(0.7f)) {
+            MetaLabel("today's budget")
+            Spacer(Modifier.height(4.dp))
+            Text(
+                if (minutesLeft <= 0) "0 min left" else "$minutesLeft min left",
+                style = MaterialTheme.typography.displayLarge,
+                color = FgColor.Ink,
+                fontWeight = FontWeight.Bold,
+            )
+            if (budgetTotal > 0) {
+                Text(
+                    "of ${budgetTotal}m total",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = FgColor.Slate,
+                )
+                Spacer(Modifier.height(10.dp))
+                TideLine(
+                    progress = if (budgetTotal > 0) 1f - minutesLeft.toFloat() / budgetTotal else 0f,
+                    color = FgColor.Red,
+                    trackColor = FgColor.Ink.copy(0.18f),
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SketchButton(
+                    onClick = onBlockNow,
+                    text = "block now",
+                    fillColor = FgColor.Ink,
+                    textColor = FgColor.Paper,
+                    modifier = Modifier.height(40.dp),
+                )
+                SketchButton(
+                    onClick = onOpenAnalytics,
+                    text = "analytics →",
+                    hatched = true,
+                    hatchColor1 = FgColor.BgDot,
+                    hatchColor2 = FgColor.Line,
+                    textColor = FgColor.Ink,
+                    modifier = Modifier.height(40.dp),
+                )
             }
         }
     }
-    Spacer(Modifier.height(12.dp))
-    // Streak card
-    Surface(shape = RoundedCornerShape(14.dp), color = FgColor.Paper, border = BorderStroke(1.dp, FgColor.Line),
-        modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Streak $streak days" }) {
-        Column(Modifier.padding(16.dp)) {
-            Text("Streak", style = MaterialTheme.typography.titleLarge, color = FgColor.Ink)
-            Text(if (streak <= 0) "Your streak starts today." else "$streak days", color = FgColor.Ink)
+
+    Spacer(Modifier.height(10.dp))
+
+    // ── Streak Card (peach index tab style) ───────────────────────
+    val next = remember(windows) { WindowLogic.nextWindowStart(LocalDateTime.now(), windows) }
+    val active = remember(windows) { WindowLogic.activeWindow(LocalDateTime.now(), windows) }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        // Streak
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .background(FgColor.Peach, RoundedCornerShape(14.dp))
+                .sketchBorder(FgColor.Ink, strokeWidth = 2.dp, cornerRadius = 14.dp)
+                .padding(14.dp),
+        ) {
+            Column {
+                MetaLabel("streak")
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    if (streak <= 0) "starts today!" else "${streak}d 🔥",
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = FgColor.Ink,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        }
+
+        // Next block
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .background(FgColor.BlueSoft, RoundedCornerShape(14.dp))
+                .sketchBorder(FgColor.Blue, strokeWidth = 2.dp, cornerRadius = 14.dp)
+                .padding(14.dp),
+        ) {
+            Column {
+                MetaLabel("next block", color = FgColor.Blue.copy(0.7f))
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    when {
+                        active != null -> "active now!"
+                        next  != null  -> next.toString()
+                        else           -> "none set"
+                    },
+                    style = MaterialTheme.typography.titleMedium,
+                    color = FgColor.Blue,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
         }
     }
-    Spacer(Modifier.height(12.dp))
-    // Phase 6: usage report card (real phone-wide screen time, optional permission)
-    Surface(shape = RoundedCornerShape(14.dp), color = FgColor.Paper, border = BorderStroke(1.dp, FgColor.Line), modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp)) {
-            Text("This week in your apps", style = MaterialTheme.typography.titleLarge, color = FgColor.Ink)
+
+    Spacer(Modifier.height(10.dp))
+
+    // ── Usage Card ────────────────────────────────────────────────
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(FgColor.Paper, RoundedCornerShape(16.dp))
+            .sketchBorder(FgColor.Ink, strokeWidth = 2.dp, cornerRadius = 16.dp)
+            .padding(14.dp),
+    ) {
+        Column {
+            MetaLabel("this week in your apps")
+            Spacer(Modifier.height(6.dp))
             if (!usageGranted) {
-                Text("Turn on usage access to see where your time goes.", color = FgColor.Slate)
-                OutlinedButton(onClick = onRequestUsage) { Text("Turn on") }
+                Text("turn on usage access to see where your time goes.",
+                    color = FgColor.Slate, style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.height(6.dp))
+                SketchButton(
+                    onClick = onRequestUsage,
+                    text = "turn on",
+                    fillColor = FgColor.Ink,
+                    textColor = FgColor.Paper,
+                    modifier = Modifier.height(38.dp),
+                )
             } else if (usageTop.isEmpty()) {
-                Text("No usage yet this week.", color = FgColor.Slate)
+                Text("no usage yet this week.", color = FgColor.Slate, style = MaterialTheme.typography.bodyMedium)
             } else {
                 val maxMs = usageTop.maxOf { it.second }.coerceAtLeast(1L)
                 usageTop.take(5).forEach { (pkg, ms) ->
                     val mins = (ms / 60_000L).toInt()
-                    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(pkg.substringAfterLast("."), Modifier.weight(1f), color = FgColor.Ink)
-                        Text("$mins m", color = FgColor.Ink)
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            pkg.substringAfterLast("."),
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = FgColor.Ink,
+                        )
+                        PillTag("${mins}m", bgColor = FgColor.Yellow)
                     }
-                    LinearProgressIndicator(progress = { mins.toFloat() / (maxMs / 60_000L).coerceAtLeast(1L) },
-                        modifier = Modifier.fillMaxWidth(), color = FgColor.Tide, trackColor = FgColor.Line)
+                    TideLine(
+                        progress = mins.toFloat() / (maxMs / 60_000L).coerceAtLeast(1L),
+                        color = FgColor.Green,
+                        trackColor = FgColor.Line,
+                        height = 5.dp,
+                    )
+                    Spacer(Modifier.height(2.dp))
                 }
             }
         }
     }
-    Spacer(Modifier.height(12.dp))
-    TextButton(onClick = onOpenAnalytics) { Text("Monitored apps") }
+    Spacer(Modifier.height(8.dp))
 }
 
+// ══════════════════════════════════════════════════════════════════
+//  ANALYTICS SCREEN — sketchy bar chart
+// ══════════════════════════════════════════════════════════════════
+
 @Composable
-fun AnalyticsScreen(weekly: List<com.bharath.focusguard.data.local.entities.AppDaily>, budgetPerDay: Int) {
-    Column(Modifier.fillMaxSize().padding(20.dp)) {
-        Text("Analytics", style = MaterialTheme.typography.headlineLarge, color = FgColor.Ink)
-        Spacer(Modifier.height(12.dp))
-        Text("Time in your apps", style = MaterialTheme.typography.titleLarge, color = FgColor.Ink)
-        // 7 bars: minutes used per day (last 7 days)
-        val days = remember(weekly) {
-            val today = LocalDate.now()
-            (0..6).map { d ->
-                val day = today.minusDays((6 - d).toLong())
-                day to weekly.filter { it.dateEpochDay == day.toEpochDay() }.sumOf { it.minutes }
+fun AnalyticsScreen(
+    weekly: List<com.bharath.focusguard.data.local.entities.AppDaily>,
+    budgetPerDay: Int,
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item {
+            Text("analytics", style = MaterialTheme.typography.headlineLarge, color = FgColor.Ink)
+        }
+
+        item {
+            // Bar chart card
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(FgColor.Paper, RoundedCornerShape(16.dp))
+                    .sketchBorder(FgColor.Ink, strokeWidth = 2.dp, cornerRadius = 16.dp)
+                    .padding(14.dp),
+            ) {
+                Column {
+                    MetaLabel("time in your apps — last 7 days")
+                    Spacer(Modifier.height(10.dp))
+
+                    val days = remember(weekly) {
+                        val today = LocalDate.now()
+                        (0..6).map { d ->
+                            val day = today.minusDays((6 - d).toLong())
+                            day to weekly.filter { it.dateEpochDay == day.toEpochDay() }.sumOf { it.minutes }
+                        }
+                    }
+                    val max = (days.maxOfOrNull { it.second } ?: 1).coerceAtLeast(1)
+
+                    Canvas(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(130.dp)
+                            .semantics { contentDescription = days.joinToString { "${it.first.dayOfWeek.name.take(2)}: ${it.second}m" } }
+                    ) {
+                        val bw = size.width / 7f
+                        val labels = listOf("Mo","Tu","We","Th","Fr","Sa","Su")
+                        days.forEachIndexed { i, (day, mins) ->
+                            val barH = size.height * 0.85f * (mins.toFloat() / max)
+                            val left = i * bw + bw * 0.15f
+                            val barWidth = bw * 0.70f
+                            // Bar fill with hatch
+                            if (barH > 0) {
+                                val barColor = if (mins.toFloat() / max >= 0.85f) FgColor.Red else FgColor.Green
+                                drawRect(
+                                    color = barColor,
+                                    topLeft = Offset(left, size.height * 0.85f - barH),
+                                    size = Size(barWidth, barH),
+                                )
+                                // Sketch-style top border on bar
+                                drawLine(
+                                    FgColor.Ink,
+                                    Offset(left, size.height * 0.85f - barH),
+                                    Offset(left + barWidth, size.height * 0.85f - barH),
+                                    strokeWidth = 2.5f,
+                                )
+                            }
+                        }
+                        // Budget guide line
+                        if (budgetPerDay > 0) {
+                            val bh = size.height * 0.85f * (budgetPerDay.toFloat() / max.coerceAtLeast(budgetPerDay))
+                            drawLine(
+                                FgColor.Blue,
+                                Offset(0f, size.height * 0.85f - bh),
+                                Offset(size.width, size.height * 0.85f - bh),
+                                strokeWidth = 2.5f,
+                                pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(10f, 6f)),
+                            )
+                        }
+                        // Baseline
+                        drawLine(FgColor.Ink, Offset(0f, size.height * 0.86f), Offset(size.width, size.height * 0.86f), strokeWidth = 2f)
+                    }
+                }
             }
         }
-        val max = (days.maxOfOrNull { it.second } ?: 1).coerceAtLeast(1)
-        Canvas(modifier = Modifier.fillMaxWidth().height(140.dp)
-            .semantics { contentDescription = days.joinToString { "${it.first.dayOfWeek}: ${it.second} minutes" } }) {
-            val bw = size.width / 7
-            days.forEachIndexed { i, (_, mins) ->
-                val h = size.height * (mins.toFloat() / max)
-                drawRect(FgColor.Tide, topLeft = androidx.compose.ui.geometry.Offset(i * bw + bw * 0.2f, size.height - h),
-                    size = androidx.compose.ui.geometry.Size(bw * 0.6f, h))
-            }
-            // budget dashed line approximation: solid thin Lock line
-            val bh = size.height * (budgetPerDay.coerceAtLeast(1).toFloat() / max.coerceAtLeast(budgetPerDay))
-            drawLine(FgColor.Lock, start = androidx.compose.ui.geometry.Offset(0f, size.height - bh),
-                end = androidx.compose.ui.geometry.Offset(size.width, size.height - bh), strokeWidth = 3f)
+
+        item {
+            MetaLabel("by app this week")
         }
-        Spacer(Modifier.height(12.dp))
-        Text("By app, this week", style = MaterialTheme.typography.titleLarge, color = FgColor.Ink)
-        val byApp = weekly.groupBy { it.packageName }.mapValues { (_, v) -> v.sumOf { it.minutes } }.toList().sortedByDescending { it.second }.take(10)
-        if (byApp.isEmpty()) Text("Nothing to show yet. Your first week of data will appear here.", color = FgColor.Slate)
-        byApp.forEach { (pkg, mins) ->
-            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(pkg.substringAfterLast("."), Modifier.weight(1f), color = FgColor.Ink)
-                Text(if (mins >= 60) "${mins / 60} h ${mins % 60} m" else "$mins m", color = FgColor.Ink)
+
+        val byApp = weekly.groupBy { it.packageName }
+            .mapValues { (_, v) -> v.sumOf { it.minutes } }
+            .toList().sortedByDescending { it.second }.take(10)
+
+        if (byApp.isEmpty()) {
+            item {
+                Text("nothing to show yet.", color = FgColor.Slate, style = MaterialTheme.typography.bodyMedium)
+            }
+        } else {
+            items(byApp) { (pkg, mins) ->
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(FgColor.Paper, RoundedCornerShape(12.dp))
+                        .sketchBorder(FgColor.Ink.copy(0.4f), strokeWidth = 1.5.dp, cornerRadius = 12.dp)
+                        .padding(10.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            pkg.substringAfterLast("."),
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = FgColor.Ink,
+                        )
+                        PillTag(
+                            if (mins >= 60) "${mins / 60}h ${mins % 60}m" else "${mins}m",
+                            bgColor = FgColor.Yellow,
+                        )
+                    }
+                }
             }
         }
+
+        item { Spacer(Modifier.height(16.dp)) }
     }
 }
+
+// ══════════════════════════════════════════════════════════════════
+//  BLOCK WINDOWS SCREEN — sketch list of time-block windows
+// ══════════════════════════════════════════════════════════════════
 
 @Composable
 fun BlockWindowsScreen(
@@ -143,28 +348,75 @@ fun BlockWindowsScreen(
     onDelete: (Long) -> Unit,
     onAdd: () -> Unit,
 ) {
-    Column(Modifier.fillMaxSize().padding(20.dp)) {
-        Text("Block windows", style = MaterialTheme.typography.headlineLarge, color = FgColor.Ink)
-        Spacer(Modifier.height(12.dp))
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
+    Column(Modifier.fillMaxSize()) {
+        Text("block windows", style = MaterialTheme.typography.headlineLarge, color = FgColor.Ink)
+        Spacer(Modifier.height(10.dp))
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             items(windows, key = { it.id }) { w ->
-                Surface(shape = RoundedCornerShape(14.dp), color = FgColor.Paper, border = BorderStroke(1.dp, FgColor.Line), modifier = Modifier.fillMaxWidth()) {
-                    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            if (w.enabled) FgColor.GreenSoft else FgColor.Paper,
+                            RoundedCornerShape(14.dp),
+                        )
+                        .sketchBorder(
+                            if (w.enabled) FgColor.Green else FgColor.Line,
+                            strokeWidth = 2.dp,
+                            cornerRadius = 14.dp,
+                        )
+                        .padding(12.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            Text(w.name.ifBlank { "Block" }, color = FgColor.Ink)
-                            Text("${w.startMinute / 60}:${"%02d".format(w.startMinute % 60)}â€“${w.endMinute / 60}:${"%02d".format(w.endMinute % 60)}", color = FgColor.Slate)
+                            Text(
+                                w.name.ifBlank { "Block" },
+                                style = MaterialTheme.typography.titleMedium,
+                                color = FgColor.Ink,
+                            )
+                            Text(
+                                "${w.startMinute / 60}:${"%02d".format(w.startMinute % 60)} – ${w.endMinute / 60}:${"%02d".format(w.endMinute % 60)}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = FgColor.Slate,
+                            )
                         }
                         if (activeNow) {
-                            Text("On", color = FgColor.TideInk)
+                            PillTag("on", bgColor = FgColor.GreenSoft, textColor = FgColor.TideInk)
                         } else {
-                            Switch(checked = w.enabled, onCheckedChange = { onToggle(w.copy(enabled = it)) })
-                            TextButton(onClick = { onDelete(w.id) }) { Text("Delete") }
+                            Switch(
+                                checked = w.enabled,
+                                onCheckedChange = { onToggle(w.copy(enabled = it)) },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = FgColor.Paper,
+                                    checkedTrackColor = FgColor.Green,
+                                    uncheckedThumbColor = FgColor.Slate,
+                                    uncheckedTrackColor = FgColor.Line,
+                                ),
+                            )
+                            TextButton(onClick = { onDelete(w.id) }) {
+                                Text("delete", color = FgColor.Red, style = MaterialTheme.typography.bodyMedium)
+                            }
                         }
                     }
                 }
             }
         }
-        if (activeNow) Text("This block is on. You can leave early from the block screen.", color = FgColor.Slate)
-        Button(onClick = onAdd, modifier = Modifier.fillMaxWidth()) { Text("+ Add block window") }
+
+        if (activeNow) {
+            Text("block is active. leave early from the block screen.", color = FgColor.Slate,
+                style = MaterialTheme.typography.bodyMedium)
+        }
+
+        Spacer(Modifier.height(8.dp))
+        SketchButton(
+            onClick = onAdd,
+            text = "+ add block window",
+            fillColor = FgColor.Ink,
+            textColor = FgColor.Paper,
+            modifier = Modifier.fillMaxWidth().height(48.dp),
+        )
     }
 }
