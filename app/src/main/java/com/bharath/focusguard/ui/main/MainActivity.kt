@@ -52,12 +52,17 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
 
+    /** Keep Usage Access state in Compose state so returning from Settings refreshes the UI. */
+    private val usageAccessGranted = mutableStateOf(false)
+
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { _ -> }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        usageAccessGranted.value = PermissionUtils.hasUsageAccess(this)
 
         if (!PermissionUtils.hasAccessibilityPermission(this) || !PermissionUtils.hasOverlayPermission(this)) {
             startActivity(Intent(this, OnboardingActivity::class.java))
@@ -133,7 +138,7 @@ class MainActivity : ComponentActivity() {
                         onDeleteWindow = { viewModel.deleteWindow(it) },
                         onAddWindow = { showEditor = true },
                         onBlockNow = { showBlockNow = true },
-                        usageGranted = PermissionUtils.hasUsageAccess(this@MainActivity),
+                        usageGranted = usageAccessGranted.value,
                         usageTop = viewModel.usageTop,
                         onRequestUsage = { PermissionUtils.requestUsageAccess(this@MainActivity) },
                         appMode = viewModel.appMode.collectAsState().value,
@@ -178,6 +183,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        usageAccessGranted.value = PermissionUtils.hasUsageAccess(this)
         viewModel.refreshStats()
         viewModel.loadUsageCard(application)
         com.bharath.focusguard.service.WindowAlarmScheduler.rescheduleAll(this)
