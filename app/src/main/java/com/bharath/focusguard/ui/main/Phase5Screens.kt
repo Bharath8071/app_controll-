@@ -144,7 +144,9 @@ fun HomeCards(
                 Text(
                     when {
                         active != null -> "active now!"
-                        next  != null  -> next.toString()
+                        next  != null  -> next.format(
+                            java.time.format.DateTimeFormatter.ofPattern("EEE HH:mm")
+                        )
                         else           -> "none set"
                     },
                     style = MaterialTheme.typography.titleMedium,
