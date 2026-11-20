@@ -15,6 +15,7 @@ import androidx.compose.runtime.setValue
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -133,10 +134,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     var usageTop by androidx.compose.runtime.mutableStateOf<List<Pair<String, Long>>>(emptyList())
         private set
 
-    fun loadUsageCard(app: android.app.Application, packages: Set<String>) {
+    /**
+     * Real per-day phone usage for the analytics chart, same keys as AppDaily.
+     * Empty when Usage Access is denied, in which case the chart falls back to
+     * FocusGuard session minutes.
+     */
+    var weeklyRealUsage by androidx.compose.runtime.mutableStateOf<List<com.bharath.focusguard.data.local.entities.AppDaily>>(emptyList())
+        private set
+
+    fun loadUsageCard(app: android.app.Application) {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            // Read the monitored packages from the DB instead of the UI state so
+            // the very first onResume (before the flow is subscribed) still works.
+            val packages = db.monitoredAppDao().getAllApps().first().map { it.packageName }.toSet()
             val rows = com.bharath.focusguard.util.UsageStatsHelper.queryLast7Days(app, packages)
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { usageTop = rows }
+            val perDay = com.bharath.focusguard.util.UsageStatsHelper.queryLast7DaysPerDay(app, packages)
+                .map {
+                    com.bharath.focusguard.data.local.entities.AppDaily(
+                        dateEpochDay = it.epochDay,
+                        packageName = it.packageName,
+                        minutes = it.minutes
+                    )
+                }
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                usageTop = rows
+                weeklyRealUsage = perDay
+            }
         }
     }
 

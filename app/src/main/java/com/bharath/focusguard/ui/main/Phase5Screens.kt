@@ -18,7 +18,9 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.bharath.focusguard.data.local.entities.BlockWindow
 import com.bharath.focusguard.ui.theme.*
 import com.bharath.focusguard.util.WindowLogic
@@ -217,13 +219,44 @@ fun HomeCards(
 fun AnalyticsScreen(
     weekly: List<com.bharath.focusguard.data.local.entities.AppDaily>,
     budgetPerDay: Int,
+    usageGranted: Boolean = false,
+    realWeekly: List<com.bharath.focusguard.data.local.entities.AppDaily> = emptyList(),
+    onRequestUsage: () -> Unit = {},
 ) {
+    // Prefer real phone usage when Usage Access is granted; otherwise fall
+    // back to FocusGuard's own session minutes.
+    val usingRealUsage = usageGranted && realWeekly.isNotEmpty()
+    val data = if (usingRealUsage) realWeekly else weekly
+
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
             Text("analytics", style = MaterialTheme.typography.headlineLarge, color = FgColor.Ink)
+        }
+
+        if (!usageGranted) {
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(FgColor.YellowPad, RoundedCornerShape(12.dp))
+                        .sketchBorder(FgColor.Ink.copy(0.4f), strokeWidth = 1.5.dp, cornerRadius = 12.dp)
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "usage access off — showing FocusGuard sessions only",
+                        modifier = Modifier.weight(1f),
+                        color = FgColor.Ink,
+                        fontSize = 11.sp,
+                    )
+                    TextButton(onClick = onRequestUsage) {
+                        Text("turn on", color = FgColor.Blue, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                }
+            }
         }
 
         item {
@@ -236,33 +269,39 @@ fun AnalyticsScreen(
                     .padding(14.dp),
             ) {
                 Column {
-                    MetaLabel("time in your apps — last 7 days")
+                    MetaLabel(
+                        if (usingRealUsage) "phone usage — last 7 days"
+                        else "focus sessions — last 7 days"
+                    )
                     Spacer(Modifier.height(10.dp))
 
-                    val days = remember(weekly) {
+                    val days = remember(data) {
                         val today = LocalDate.now()
                         (0..6).map { d ->
                             val day = today.minusDays((6 - d).toLong())
-                            day to weekly.filter { it.dateEpochDay == day.toEpochDay() }.sumOf { it.minutes }
+                            day to data.filter { it.dateEpochDay == day.toEpochDay() }.sumOf { it.minutes }
                         }
                     }
-                    val max = (days.maxOfOrNull { it.second } ?: 1).coerceAtLeast(1)
+                    val maxDay = (days.maxOfOrNull { it.second } ?: 1).coerceAtLeast(1)
+                    // Scale to the tallest bar OR the budget line, whichever is
+                    // bigger, so the guide line is never pinned incorrectly.
+                    val scale = maxOf(maxDay, budgetPerDay, 1)
 
                     Canvas(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(130.dp)
+                            .height(120.dp)
                             .semantics { contentDescription = days.joinToString { "${it.first.dayOfWeek.name.take(2)}: ${it.second}m" } }
                     ) {
                         val bw = size.width / 7f
-                        val labels = listOf("Mo","Tu","We","Th","Fr","Sa","Su")
-                        days.forEachIndexed { i, (day, mins) ->
-                            val barH = size.height * 0.85f * (mins.toFloat() / max)
+                        days.forEachIndexed { i, (_, mins) ->
+                            val barH = size.height * 0.85f * (mins.toFloat() / scale)
                             val left = i * bw + bw * 0.15f
                             val barWidth = bw * 0.70f
-                            // Bar fill with hatch
+                            // Bar fill
                             if (barH > 0) {
-                                val barColor = if (mins.toFloat() / max >= 0.85f) FgColor.Red else FgColor.Green
+                                val overBudget = budgetPerDay > 0 && mins > budgetPerDay
+                                val barColor = if (overBudget) FgColor.Red else FgColor.Green
                                 drawRect(
                                     color = barColor,
                                     topLeft = Offset(left, size.height * 0.85f - barH),
@@ -279,7 +318,7 @@ fun AnalyticsScreen(
                         }
                         // Budget guide line
                         if (budgetPerDay > 0) {
-                            val bh = size.height * 0.85f * (budgetPerDay.toFloat() / max.coerceAtLeast(budgetPerDay))
+                            val bh = size.height * 0.85f * (budgetPerDay.toFloat() / scale)
                             drawLine(
                                 FgColor.Blue,
                                 Offset(0f, size.height * 0.85f - bh),
@@ -291,6 +330,33 @@ fun AnalyticsScreen(
                         // Baseline
                         drawLine(FgColor.Ink, Offset(0f, size.height * 0.86f), Offset(size.width, size.height * 0.86f), strokeWidth = 2f)
                     }
+
+                    // Day labels under the bars. The old chart created a
+                    // fixed Mo–Su label list but never drew it, so the bars
+                    // had no dates and could not match the day they showed.
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        val today = LocalDate.now()
+                        days.forEach { (day, _) ->
+                            val label = day.dayOfWeek.name.take(2)
+                                .lowercase()
+                                .replaceFirstChar { it.uppercase() }
+                            Text(
+                                label,
+                                modifier = Modifier.weight(1f),
+                                textAlign = TextAlign.Center,
+                                fontSize = 10.sp,
+                                color = if (day == today) FgColor.Ink else FgColor.Slate,
+                                fontWeight = if (day == today) FontWeight.Bold else FontWeight.Normal,
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        if (usingRealUsage) "from Android usage access"
+                        else "recorded by FocusGuard sessions — enable usage access for real phone time",
+                        color = FgColor.Slate,
+                        fontSize = 10.sp,
+                    )
                 }
             }
         }
@@ -299,7 +365,7 @@ fun AnalyticsScreen(
             MetaLabel("by app this week")
         }
 
-        val byApp = weekly.groupBy { it.packageName }
+        val byApp = data.groupBy { it.packageName }
             .mapValues { (_, v) -> v.sumOf { it.minutes } }
             .toList().sortedByDescending { it.second }.take(10)
 

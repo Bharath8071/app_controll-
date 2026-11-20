@@ -18,6 +18,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -112,10 +114,20 @@ class MainActivity : ComponentActivity() {
                         onSaveNotion = viewModel::saveNotion,
                         onOpenPermissions = { showPerms = true },
                         currentTab = tab,
-                        onTab = { tab = it },
+                        onTab = {
+                            tab = it
+                            // Refresh whenever the Stats tab is opened; otherwise
+                            // session/usage rows written while the app was in the
+                            // background may not be reflected until the next resume.
+                            if (it == 1) {
+                                viewModel.refreshStats()
+                                viewModel.loadUsageCard(application)
+                            }
+                        },
                         windows = viewModel.windows.collectAsState().value,
                         streak = viewModel.streakDays.collectAsState().value,
                         weekly = viewModel.weeklyAppMinutes,
+                        realWeekly = viewModel.weeklyRealUsage,
                         budgetPerDay = apps.sumOf { it.app.dailyBudgetMinutes },
                         onToggleWindow = { viewModel.saveWindow(it) },
                         onDeleteWindow = { viewModel.deleteWindow(it) },
@@ -167,7 +179,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         viewModel.refreshStats()
-        viewModel.loadUsageCard(application, viewModel.monitoredApps.value.map { it.app.packageName }.toSet())
+        viewModel.loadUsageCard(application)
         com.bharath.focusguard.service.WindowAlarmScheduler.rescheduleAll(this)
         if (!PermissionUtils.hasAccessibilityPermission(this) || !PermissionUtils.hasOverlayPermission(this)) {
             com.bharath.focusguard.util.NotificationHelper.showPermissionLost(this)
@@ -199,6 +211,7 @@ fun MainScreen(
     windows: List<com.bharath.focusguard.data.local.entities.BlockWindow> = emptyList(),
     streak: Int = 0,
     weekly: List<com.bharath.focusguard.data.local.entities.AppDaily> = emptyList(),
+    realWeekly: List<com.bharath.focusguard.data.local.entities.AppDaily> = emptyList(),
     budgetPerDay: Int = 0,
     onToggleWindow: (com.bharath.focusguard.data.local.entities.BlockWindow) -> Unit = {},
     onDeleteWindow: (Long) -> Unit = {},
@@ -322,7 +335,13 @@ fun MainScreen(
 
                 when (currentTab) {
                     1 -> {
-                        AnalyticsScreen(weekly = weekly, budgetPerDay = budgetPerDay)
+                        AnalyticsScreen(
+                            weekly = weekly,
+                            budgetPerDay = budgetPerDay,
+                            usageGranted = usageGranted,
+                            realWeekly = realWeekly,
+                            onRequestUsage = onRequestUsage,
+                        )
                         return@Column
                     }
                     2 -> {
@@ -389,6 +408,14 @@ fun MainScreen(
                 }
 
                 // ── Tab 0: Home ──
+                // Scroll the whole tab as one page. Previously the outer Column
+                // was fixed, so on shorter screens the cards above the app list
+                // consumed the height and the page could not scroll.
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState())
+                ) {
                 HomeCards(
                     minutesLeft = (budgetPerDay - apps.sumOf { it.minutesUsedToday }).coerceAtLeast(0),
                     budgetTotal = budgetPerDay, windows = windows, streak = streak,
@@ -546,7 +573,7 @@ fun MainScreen(
 
                 if (apps.isEmpty()) {
                     Box(
-                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
@@ -557,11 +584,8 @@ fun MainScreen(
                         )
                     }
                 } else {
-                    LazyColumn(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        items(apps, key = { it.app.packageName }) { row ->
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        apps.forEach { row ->
                             MonitoredAppCard(
                                 row = row,
                                 packageManager = packageManager,
@@ -609,6 +633,7 @@ fun MainScreen(
                 }
 
                 Spacer(Modifier.height(12.dp))
+                } // end Home tab scroll
             }
         }
     }
