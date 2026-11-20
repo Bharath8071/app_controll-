@@ -42,6 +42,7 @@ fun HomeCards(
     usageGranted: Boolean = false,
     usageTop: List<Pair<String, Long>> = emptyList(),
     onRequestUsage: () -> Unit = {},
+    appLabels: Map<String, String> = emptyMap(),
 ) {
     // ── Today Card (yellow sticky note, rotated slightly) ──────────
     Box(
@@ -192,7 +193,7 @@ fun HomeCards(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            pkg.substringAfterLast("."),
+                            appLabels[pkg] ?: shortAppName(pkg),
                             modifier = Modifier.weight(1f),
                             style = MaterialTheme.typography.bodyMedium,
                             color = FgColor.Ink,
@@ -224,6 +225,7 @@ fun AnalyticsScreen(
     usageGranted: Boolean = false,
     realWeekly: List<com.bharath.focusguard.data.local.entities.AppDaily> = emptyList(),
     onRequestUsage: () -> Unit = {},
+    appLabels: Map<String, String> = emptyMap(),
 ) {
     // Prefer real phone usage when Usage Access is granted; otherwise fall
     // back to FocusGuard's own session minutes.
@@ -386,7 +388,7 @@ fun AnalyticsScreen(
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            pkg.substringAfterLast("."),
+                            appLabels[pkg] ?: shortAppName(pkg),
                             modifier = Modifier.weight(1f),
                             style = MaterialTheme.typography.bodyMedium,
                             color = FgColor.Ink,
@@ -486,5 +488,18 @@ fun BlockWindowsScreen(
             textColor = FgColor.Paper,
             modifier = Modifier.fillMaxWidth().height(48.dp),
         )
+    }
+}
+
+/**
+ * Human-friendly fallback when the monitored-app label map is unavailable.
+ * `com.instagram.android` would otherwise display as "android" because the
+ * last package segment is the generic ".android" suffix.
+ */
+private fun shortAppName(pkg: String): String {
+    val parts = pkg.split('.')
+    return when {
+        parts.size >= 2 && parts.last() == "android" -> parts[parts.size - 2]
+        else -> parts.lastOrNull()?.takeIf { it.isNotBlank() } ?: pkg
     }
 }

@@ -233,6 +233,12 @@ fun MainScreen(
     var showNotion by remember { mutableStateOf(false) }
     var editingApp by remember { mutableStateOf<MonitoredApp?>(null) }
 
+    // Real package names are ugly (com.instagram.android would show as
+    // "android" with substringAfterLast); use the monitored app label.
+    val appLabels = remember(apps) {
+        apps.associate { it.app.packageName to it.app.displayName }
+    }
+
     val totalBudget = apps.sumOf { it.app.dailyBudgetMinutes }
     val totalUsed = apps.sumOf { it.minutesUsedToday }
 
@@ -347,6 +353,7 @@ fun MainScreen(
                             usageGranted = usageGranted,
                             realWeekly = realWeekly,
                             onRequestUsage = onRequestUsage,
+                            appLabels = appLabels,
                         )
                         return@Column
                     }
@@ -426,7 +433,8 @@ fun MainScreen(
                     minutesLeft = (budgetPerDay - apps.sumOf { it.minutesUsedToday }).coerceAtLeast(0),
                     budgetTotal = budgetPerDay, windows = windows, streak = streak,
                     onBlockNow = onBlockNow, onOpenAnalytics = { onTab(1) },
-                    usageGranted = usageGranted, usageTop = usageTop, onRequestUsage = onRequestUsage
+                    usageGranted = usageGranted, usageTop = usageTop, onRequestUsage = onRequestUsage,
+                    appLabels = appLabels
                 )
 
                 Spacer(Modifier.height(8.dp))
