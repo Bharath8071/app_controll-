@@ -2,6 +2,7 @@ package com.bharath.focusguard.ui.main
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -15,6 +16,7 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -26,6 +28,7 @@ import com.bharath.focusguard.ui.theme.*
 import com.bharath.focusguard.util.WindowLogic
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
 // ══════════════════════════════════════════════════════════════════
 //  HOME CARDS — today, next block, streak, usage
@@ -231,6 +234,11 @@ fun AnalyticsScreen(
     // back to FocusGuard's own session minutes.
     val usingRealUsage = usageGranted && realWeekly.isNotEmpty()
     val data = if (usingRealUsage) realWeekly else weekly
+    val today = LocalDate.now()
+
+    // The chart always shows the last 7 days. Tapping a bar selects that day
+    // and updates the per-app breakdown below; the default is today.
+    var selectedDay by remember { mutableStateOf(today) }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp),
@@ -279,8 +287,7 @@ fun AnalyticsScreen(
                     )
                     Spacer(Modifier.height(10.dp))
 
-                    val days = remember(data) {
-                        val today = LocalDate.now()
+                    val days = remember(data, today) {
                         (0..6).map { d ->
                             val day = today.minusDays((6 - d).toLong())
                             day to data.filter { it.dateEpochDay == day.toEpochDay() }.sumOf { it.minutes }
@@ -295,13 +302,36 @@ fun AnalyticsScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(120.dp)
-                            .semantics { contentDescription = days.joinToString { "${it.first.dayOfWeek.name.take(2)}: ${it.second}m" } }
+                            .pointerInput(days) {
+                                detectTapGestures { offset ->
+                                    val index = (offset.x / (size.width / 7f))
+                                        .toInt()
+                                        .coerceIn(0, 6)
+                                    selectedDay = days[index].first
+                                }
+                            }
+                            .semantics {
+                                contentDescription = days.joinToString {
+                                    "${it.first.dayOfWeek.name.take(2)}: ${it.second}m"
+                                } + ". Tap a bar to see that day's apps."
+                            }
                     ) {
                         val bw = size.width / 7f
-                        days.forEachIndexed { i, (_, mins) ->
+                        days.forEachIndexed { i, (day, mins) ->
                             val barH = size.height * 0.85f * (mins.toFloat() / scale)
                             val left = i * bw + bw * 0.15f
                             val barWidth = bw * 0.70f
+                            val isSelected = day == selectedDay
+
+                            // Selected-day column highlight
+                            if (isSelected) {
+                                drawRect(
+                                    color = FgColor.Blue.copy(alpha = 0.09f),
+                                    topLeft = Offset(i * bw, 0f),
+                                    size = Size(bw, size.height * 0.86f),
+                                )
+                            }
+
                             // Bar fill
                             if (barH > 0) {
                                 val overBudget = budgetPerDay > 0 && mins > budgetPerDay
@@ -311,12 +341,12 @@ fun AnalyticsScreen(
                                     topLeft = Offset(left, size.height * 0.85f - barH),
                                     size = Size(barWidth, barH),
                                 )
-                                // Sketch-style top border on bar
+                                // Sketch-style top border; blue and thicker when selected
                                 drawLine(
-                                    FgColor.Ink,
-                                    Offset(left, size.height * 0.85f - barH),
-                                    Offset(left + barWidth, size.height * 0.85f - barH),
-                                    strokeWidth = 2.5f,
+                                    color = if (isSelected) FgColor.Blue else FgColor.Ink,
+                                    start = Offset(left, size.height * 0.85f - barH),
+                                    end = Offset(left + barWidth, size.height * 0.85f - barH),
+                                    strokeWidth = if (isSelected) 4f else 2.5f,
                                 )
                             }
                         }
@@ -339,22 +369,56 @@ fun AnalyticsScreen(
                     // fixed Mo–Su label list but never drew it, so the bars
                     // had no dates and could not match the day they showed.
                     Row(modifier = Modifier.fillMaxWidth()) {
-                        val today = LocalDate.now()
                         days.forEach { (day, _) ->
                             val label = day.dayOfWeek.name.take(2)
                                 .lowercase()
                                 .replaceFirstChar { it.uppercase() }
+                            val isSelected = day == selectedDay
                             Text(
                                 label,
                                 modifier = Modifier.weight(1f),
                                 textAlign = TextAlign.Center,
                                 fontSize = 10.sp,
-                                color = if (day == today) FgColor.Ink else FgColor.Slate,
-                                fontWeight = if (day == today) FontWeight.Bold else FontWeight.Normal,
+                                color = when {
+                                    isSelected -> FgColor.Blue
+                                    day == today -> FgColor.Ink
+                                    else -> FgColor.Slate
+                                },
+                                fontWeight = if (isSelected || day == today) FontWeight.Bold else FontWeight.Normal,
                             )
                         }
                     }
-                    Spacer(Modifier.height(6.dp))
+
+                    Spacer(Modifier.height(8.dp))
+
+                    val selectedMinutes = days.firstOrNull { it.first == selectedDay }?.second ?: 0
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                dayDisplayLabel(selectedDay, today),
+                                style = MaterialTheme.typography.titleMedium,
+                                color = FgColor.Ink,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                "tap a bar to see that day's apps",
+                                color = FgColor.Slate,
+                                fontSize = 10.sp,
+                            )
+                        }
+                        Text(
+                            formatMinutes(selectedMinutes),
+                            style = MaterialTheme.typography.titleLarge,
+                            color = FgColor.Ink,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+
+                    Spacer(Modifier.height(4.dp))
                     Text(
                         if (usingRealUsage) "from Android usage access"
                         else "recorded by FocusGuard sessions — enable usage access for real phone time",
@@ -366,16 +430,17 @@ fun AnalyticsScreen(
         }
 
         item {
-            MetaLabel("by app this week")
+            MetaLabel(appDayHeader(selectedDay, today))
         }
 
-        val byApp = data.groupBy { it.packageName }
+        val byApp = data.filter { it.dateEpochDay == selectedDay.toEpochDay() }
+            .groupBy { it.packageName }
             .mapValues { (_, v) -> v.sumOf { it.minutes } }
             .toList().sortedByDescending { it.second }.take(10)
 
         if (byApp.isEmpty()) {
             item {
-                Text("nothing to show yet.", color = FgColor.Slate, style = MaterialTheme.typography.bodyMedium)
+                Text("nothing recorded for this day.", color = FgColor.Slate, style = MaterialTheme.typography.bodyMedium)
             }
         } else {
             items(byApp) { (pkg, mins) ->
@@ -394,7 +459,7 @@ fun AnalyticsScreen(
                             color = FgColor.Ink,
                         )
                         PillTag(
-                            if (mins >= 60) "${mins / 60}h ${mins % 60}m" else "${mins}m",
+                            formatMinutes(mins),
                             bgColor = FgColor.Yellow,
                         )
                     }
@@ -502,4 +567,19 @@ private fun shortAppName(pkg: String): String {
         parts.size >= 2 && parts.last() == "android" -> parts[parts.size - 2]
         else -> parts.lastOrNull()?.takeIf { it.isNotBlank() } ?: pkg
     }
+}
+
+private fun formatMinutes(mins: Int): String =
+    if (mins >= 60) "${mins / 60}h ${mins % 60}m" else "${mins}m"
+
+private fun dayDisplayLabel(day: LocalDate, today: LocalDate): String = when (day) {
+    today -> "today"
+    today.minusDays(1) -> "yesterday"
+    else -> day.format(DateTimeFormatter.ofPattern("EEE d MMM"))
+}
+
+private fun appDayHeader(day: LocalDate, today: LocalDate): String = when (day) {
+    today -> "by app today"
+    today.minusDays(1) -> "by app yesterday"
+    else -> "by app — " + day.format(DateTimeFormatter.ofPattern("EEE d MMM"))
 }
