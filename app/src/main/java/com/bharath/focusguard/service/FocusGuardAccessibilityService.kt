@@ -561,8 +561,7 @@ class FocusGuardAccessibilityService : AccessibilityService() {
             withContext(Dispatchers.Main) {
                 overlayManager.hideAll()
                 exitToHome(pkg)
-                val minsLeft = ceil((cooldownExpiresAt - now) / 60_000.0).toInt().coerceAtLeast(1)
-                showToast("⏸️ " + monitored.displayName + " is on a 10-minute focus break (" + minsLeft + " min left).")
+                showToast("⏸️ " + monitored.displayName + " is on a focus break.")
             }
             return
         }
