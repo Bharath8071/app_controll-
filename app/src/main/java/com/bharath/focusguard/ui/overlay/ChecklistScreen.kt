@@ -35,21 +35,13 @@ fun ChecklistScreen(
     onContinue: () -> Unit,
     onGoHome: () -> Unit = {},
 ) {
-    // 10-second lock before Continue button activates
+    // 10-second reflection pause. The button stays disabled, but no timer or
+    // progress indicator is shown.
     var isButtonEnabled by remember { mutableStateOf(false) }
-    var countdown by remember { mutableIntStateOf(10) }
     LaunchedEffect(Unit) {
-        repeat(10) {
-            delay(1000L)
-            countdown--
-        }
+        delay(10_000L)
         isButtonEnabled = true
     }
-    val tideProgress by animateFloatAsState(
-        targetValue = if (isButtonEnabled) 1f else (10 - countdown) / 10f,
-        animationSpec = tween(900, easing = LinearEasing),
-        label = "tide",
-    )
 
     // Full-screen parchment canvas with dot grid
     Box(
@@ -73,83 +65,55 @@ fun ChecklistScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .rotate(1.1f)  // counter-rotate content so text is straight
-                    .padding(start = 20.dp, end = 20.dp, top = 36.dp, bottom = 20.dp),
+                    .padding(start = 20.dp, end = 20.dp, top = 36.dp, bottom = 20.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                // Task area scrolls independently so the countdown/Continue
-                // footer is always visible, no matter how long the list is.
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    // Header
-                    Column {
-                        MetaLabel("before you open")
+                // Header
+                Column {
+                    MetaLabel("before you open")
+                    Text(
+                        appName,
+                        style = MaterialTheme.typography.headlineLarge,
+                        color = FgColor.Ink,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+
+                Text(
+                    "your top tasks",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = FgColor.Slate,
+                )
+
+                // Task list
+                if (tasks.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(FgColor.Paper.copy(0.7f), androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                            .sketchBorder(FgColor.Ink.copy(0.4f), strokeWidth = 1.5.dp, cornerRadius = 12.dp)
+                            .padding(14.dp),
+                    ) {
                         Text(
-                            appName,
-                            style = MaterialTheme.typography.headlineLarge,
-                            color = FgColor.Ink,
-                            fontWeight = FontWeight.Bold,
+                            "can't reach Notion. check your connection.",
+                            color = FgColor.Slate,
+                            style = MaterialTheme.typography.bodyMedium,
                         )
                     }
-
-                    Text(
-                        "your top tasks",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = FgColor.Slate,
-                    )
-
-                    // Task list
-                    if (tasks.isEmpty()) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(FgColor.Paper.copy(0.7f), androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
-                                .sketchBorder(FgColor.Ink.copy(0.4f), strokeWidth = 1.5.dp, cornerRadius = 12.dp)
-                                .padding(14.dp),
-                        ) {
-                            Text(
-                                "can't reach Notion. check your connection.",
-                                color = FgColor.Slate,
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
-                        }
-                    } else {
-                        tasks.take(3).forEach { task ->
-                            SketchTaskRow(task = task, onToggle = onToggle)
-                        }
+                } else {
+                    tasks.take(3).forEach { task ->
+                        SketchTaskRow(task = task, onToggle = onToggle)
                     }
                 }
 
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(8.dp))
 
-                // Dedicated countdown label so the wait is never hidden behind
-                // the button text or pushed off-screen by a long task list.
-                Text(
-                    text = if (isButtonEnabled) "ready to open" else "opening in ${countdown}s",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = FgColor.Ink,
-                    fontWeight = FontWeight.SemiBold,
-                )
-
-                Spacer(Modifier.height(6.dp))
-
-                // Tide progress bar (10s countdown)
-                TideLine(
-                    progress = tideProgress,
-                    color = FgColor.Ink,
-                    trackColor = FgColor.Ink.copy(0.22f),
-                    height = 8.dp,
-                )
-
-                Spacer(Modifier.height(10.dp))
-
-                // Continue button
+                // Continue button — stays disabled for the 10s pause, with no
+                // progress bar or countdown digits.
                 SketchButton(
                     onClick = onContinue,
-                    text = if (isButtonEnabled) "continue →" else "wait ${countdown}s",
+                    text = "continue →",
                     fillColor = FgColor.Ink,
                     textColor = FgColor.Paper,
                     enabled = isButtonEnabled,
