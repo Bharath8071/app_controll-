@@ -4,6 +4,12 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+// CI passes -PversionCode / -PversionName on every push, so each APK has a
+// higher versionCode than the previous one and installs as an in-place update.
+// Local builds fall back to the checked-in defaults.
+val buildVersionCode = (findProperty("versionCode") as String?)?.toIntOrNull() ?: 2
+val buildVersionName = (findProperty("versionName") as String?) ?: "0.3.0"
+
 android {
     namespace = "com.bharath.focusguard"
     compileSdk = 35
@@ -24,8 +30,8 @@ android {
         applicationId = "com.bharath.focusguard"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.3.0"
+        versionCode = buildVersionCode
+        versionName = buildVersionName
     }
 
     buildFeatures {

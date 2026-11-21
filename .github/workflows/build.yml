@@ -11,6 +11,11 @@ jobs:
   build:
     name: Build Debug APK
     runs-on: ubuntu-latest
+    env:
+      # Every push gets a higher versionCode, so the new APK installs as an
+      # in-place update over the previous one (same debug signature).
+      BUILD_VERSION_CODE: ${{ github.run_number }}
+      BUILD_VERSION_NAME: "0.3.${{ github.run_number }}"
 
     steps:
       - name: Checkout Repository
@@ -32,22 +37,36 @@ jobs:
         shell: bash
         run: |
           set -e -o pipefail
-          ./gradlew assembleDebug --stacktrace 2>&1 | tee build_log.txt
+          ./gradlew assembleDebug \
+            -PversionCode="$BUILD_VERSION_CODE" \
+            -PversionName="$BUILD_VERSION_NAME" \
+            --stacktrace --configuration-cache=off 2>&1 | tee build_log.txt
+
+      - name: Rename APK with version
+        shell: bash
+        run: |
+          cd app/build/outputs/apk/debug
+          mv app-debug.apk "FocusGuard-${BUILD_VERSION_NAME}-debug.apk"
 
       - name: Show Build Log on Failure
         if: failure()
+        shell: bash
         run: |
-          echo "=== KOTLIN ERRORS ==="
-          grep -E "^e:|error:|\.kt:[0-9]+" build_log.txt | head -80 || true
-          echo "=== BUILD LOG TAIL (last 120 lines) ==="
-          tail -n 120 build_log.txt
+          echo "=== CAUSED BY CHAIN ==="
+          grep -E "^Caused by:|> Could not|> Failed to|^e:|error:|\.kt:[0-9]+" build_log.txt | head -80 || true
+          echo "=== BUILD LOG TAIL (last 150 lines) ==="
+          tail -n 150 build_log.txt
+          echo "### Build Failed - Root Cause" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          grep -E "^Caused by:|> Could not|> Failed to" build_log.txt | head -40 >> $GITHUB_STEP_SUMMARY || true
+          echo '```' >> $GITHUB_STEP_SUMMARY
           echo "### Build Failed - Kotlin Errors" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           grep -E "^e:|error:|\.kt:[0-9]+" build_log.txt | head -60 >> $GITHUB_STEP_SUMMARY || true
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo "### Build Failed - Tail Log" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          tail -n 60 build_log.txt >> $GITHUB_STEP_SUMMARY
+          tail -n 80 build_log.txt >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Upload Build Log
