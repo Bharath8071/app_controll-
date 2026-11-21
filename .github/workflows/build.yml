@@ -40,7 +40,7 @@ jobs:
           ./gradlew assembleDebug \
             -PversionCode="$BUILD_VERSION_CODE" \
             -PversionName="$BUILD_VERSION_NAME" \
-            --stacktrace --configuration-cache=off 2>&1 | tee build_log.txt
+            --stacktrace --no-configuration-cache 2>&1 | tee build_log.txt
 
       - name: Rename APK with version
         shell: bash
