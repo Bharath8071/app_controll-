@@ -83,13 +83,17 @@ fun HomeCards(
                 )
             }
             Spacer(Modifier.height(10.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 SketchButton(
                     onClick = onBlockNow,
                     text = "block now",
                     fillColor = FgColor.Ink,
                     textColor = FgColor.Paper,
-                    modifier = Modifier.height(40.dp),
+                    modifier = Modifier.weight(1f),
                 )
                 SketchButton(
                     onClick = onOpenAnalytics,
@@ -98,7 +102,7 @@ fun HomeCards(
                     hatchColor1 = FgColor.BgDot,
                     hatchColor2 = FgColor.Line,
                     textColor = FgColor.Ink,
-                    modifier = Modifier.height(40.dp),
+                    modifier = Modifier.weight(1f),
                 )
             }
         }
@@ -183,7 +187,6 @@ fun HomeCards(
                     text = "turn on",
                     fillColor = FgColor.Ink,
                     textColor = FgColor.Paper,
-                    modifier = Modifier.height(38.dp),
                 )
             } else if (usageTop.isEmpty()) {
                 Text("no usage yet this week.", color = FgColor.Slate, style = MaterialTheme.typography.bodyMedium)
