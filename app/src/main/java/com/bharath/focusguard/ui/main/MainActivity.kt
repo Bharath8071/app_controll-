@@ -415,6 +415,15 @@ fun MainScreen(
                                     Text("🔑  Permissions", color = FgColor.Ink, fontWeight = FontWeight.SemiBold)
                                 }
                             }
+                            item {
+                                Text(
+                                    "version ${com.bharath.focusguard.BuildConfig.VERSION_NAME} (${com.bharath.focusguard.BuildConfig.VERSION_CODE})",
+                                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                                    color = FgColor.Slate,
+                                    fontSize = 11.sp,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
                         }
                         return@Column
                     }
